@@ -25,4 +25,5 @@ if __name__ == '__main__':
     find_max_affinity("Tiali")
     print("Some changes")
     print("Some more changes")
+    print("New main changes")
 
