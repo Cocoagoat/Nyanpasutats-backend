@@ -1,12 +1,8 @@
-# This is a sample Python script.
 import requests
-import json
-import time
 import sys
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
 
-
+# Client_details.txt must contain your MAL client ID on the first line,
+# and your MAL client secret on the second line.
 try:
     with open('Client_details.txt') as f:
         id_secret = f.readlines()
@@ -15,11 +11,9 @@ try:
 except IndexError:
     print("ERROR - Client_details.txt is not in the correct format")
     sys.exit(1)
-except ValueError:
-    print("ERROR - Client_details.txt not found. Please get a client ID and client secret"
-          "and write them down in a .txt file in two lines.")
-
-
+except FileNotFoundError:
+    print("ERROR - Client_details.txt not found")
+    sys.exit(1)
 
 
 def get_new_code_verifier() -> str:
@@ -28,12 +22,12 @@ def get_new_code_verifier() -> str:
 
 
 def get_initial_code_link(code_challenge):
-    url = f"""https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id={CLIENT_ID}&code_challenge={code_challenge}"""
+    url = f"""https://myanimelist.net/v1/oauth2/authorize?response_type=code
+    &client_id={CLIENT_ID}&code_challenge={code_challenge}"""
     print(f'Authorise your application by clicking here: {url}\n')
 
 
 def get_auth_token(authentication_code, code_verifier):
-    redirect_url = "https://myanimelist.net/profile/BaronBrixius"
     url = 'https://myanimelist.net/v1/oauth2/token'
     data = {
         'client_id': CLIENT_ID,
@@ -45,7 +39,6 @@ def get_auth_token(authentication_code, code_verifier):
     response = requests.post(url, data).json()
     print(response)
     return response
-    # return response['access_token']
 
 
 def get_access_token():
@@ -55,12 +48,3 @@ def get_access_token():
     access_token = get_auth_token(authentication_code, code_verifier)
     print(access_token)
     return access_token
-
-
-# token = get_auth_token()
-# print(token)
-# code_verifier = code_challenge = get_new_code_verifier()
-# get_initial_code_link(code_verifier)
-# authentication_code = input('Copy-paste the authorization code from the URL :').strip()
-# access_token = get_auth_token(authentication_code, code_verifier)
-# print(access_token)
