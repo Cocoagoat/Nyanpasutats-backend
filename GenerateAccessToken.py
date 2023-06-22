@@ -2,7 +2,7 @@
 import requests
 import json
 import time
-from general_utils import terminate_program
+import sys
 # Press Shift+F10 to execute it or replace it with your code.
 # Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
 
@@ -14,7 +14,7 @@ try:
     CLIENT_SECRET = id_secret[1]
 except IndexError:
     print("ERROR - Client_details.txt is not in the correct format")
-    terminate_program()
+    sys.exit(1)
 except ValueError:
     print("ERROR - Client_details.txt not found. Please get a client ID and client secret"
           "and write them down in a .txt file in two lines.")

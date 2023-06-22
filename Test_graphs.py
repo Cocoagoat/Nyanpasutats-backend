@@ -1,7 +1,9 @@
 from Test import *
 from MAL_utils import Seasons
 import requests
-from MAL_utils import Data
+from UserDB import UserDB
+from AnimeDB import AnimeDB
+from general_utils import *
 from polars.exceptions import ColumnNotFoundError
 import igraph as ig
 from igraph import Graph, summary, union
@@ -48,27 +50,27 @@ def get_adjacent_vertex_names(G, vertex_name):
     return adj_vertex_list
 
 
-@timeit
-def get_stats_of_shows(show_list, relevant_stats):
-    """ Will create a dictionary that has every show in show_list as the key, and every stat in relevant_stats
-        in a list as the value.
-        Example :
-        {'Shingeki no Kyojin': {'ID': 16498.0, 'Mean Score': 8.53, 'Members': 3717089.0},
-         'Shingeki no Kyojin OVA': {'ID': 18397.0, 'Mean Score': 7.87, 'Members': 439454.0}"""
-
-    stats_dict = {}
-    for show in show_list:
-        show_dict = {}
-        for stat in relevant_stats:
-            try:
-                show_dict[stat] = data.anime_df.filter(pl.col('Rows') == stat)[show].item()
-            except ColumnNotFoundError:
-                break
-            except ValueError:
-                show_dict[stat] = None
-        if show_dict:
-            stats_dict[show] = show_dict
-    return stats_dict
+# @timeit
+# def get_stats_of_shows(show_list, relevant_stats):
+#     """ Will create a dictionary that has every show in show_list as the key, and every stat in relevant_stats
+#         in a list as the value.
+#         Example :
+#         {'Shingeki no Kyojin': {'ID': 16498.0, 'Mean Score': 8.53, 'Members': 3717089.0},
+#          'Shingeki no Kyojin OVA': {'ID': 18397.0, 'Mean Score': 7.87, 'Members': 439454.0}"""
+#
+#     stats_dict = {}
+#     for show in show_list:
+#         show_dict = {}
+#         for stat in relevant_stats:
+#             try:
+#                 show_dict[stat] = data.anime_df.filter(pl.col('Rows') == stat)[show].item()
+#             except ColumnNotFoundError:
+#                 break
+#             except ValueError:
+#                 show_dict[stat] = None
+#         if show_dict:
+#             stats_dict[show] = show_dict
+#     return stats_dict
 
 
 def are_separate_shows(show1,show2, relation_type):
@@ -85,11 +87,11 @@ def are_separate_shows(show1,show2, relation_type):
         #     show_stats[name]["Duration"]=65
         return show_stats[name]["Duration"] * show_stats[name]["Episodes"] > minutes
 
-    if show1 not in data.titles or show2 not in data.titles: #take care of this outside later
+    if show1 not in anime_db.titles or show2 not in anime_db.titles: #take care of this outside later
         return True
 
     relevant_stats = ["Duration", "Episodes", "Type"]
-    show_stats = get_stats_of_shows([show1,show2], relevant_stats)
+    show_stats = anime_db.get_stats_of_shows([show1,show2], relevant_stats)
     #Put these into the 3rd case^
     match relation_type:
         case 'sequel' | 'prequel' | 'alternative_version' | 'summary':
@@ -127,16 +129,12 @@ def split_graph(G):
     for vertex in G.vs:
         vertex_edge_list = vertex.incident()
         for edge in vertex_edge_list:
-            # print(f"Current edge : {edge}")
             v1,v2 = edge.vertex_tuple
 
             relation_type = edge['relation']
             if are_separate_shows(v1['name'],v2['name'],relation_type):
                 edges_to_delete.append((v1.index,v2.index))
                 edges_to_delete.append((v2.index,v1.index))
-
-
-    # manually_separate_shows(edges_to_delete)
 
     for v1,v2 in set(edges_to_delete):
         edge_to_delete = G.get_eid(v1, v2, directed=True, error=False)
@@ -162,9 +160,8 @@ def split_graphs(graph_dict):
     return new_graph_dict
 
 
-
 def determine_main_show(G):
-    members_of_each_show = get_stats_of_shows(G.vs['name'],['Scores'])
+    members_of_each_show = anime_db.get_stats_of_shows(G.vs['name'],['Scores'])
     return max(members_of_each_show, key=lambda x: members_of_each_show[x]['Scores'])
 
 
@@ -186,12 +183,9 @@ def graph_dict_to_database(graph_dict):
     # {'Shingeki no Kyojin' : ['Shingeki no Kyojin', 'Shingeki no Kyojin Season 2', ....], 'Steins;Gate : [...]}
     related_dict ={}
     for key,graph in graph_dict.items():
-        related_dict[key] = get_stats_of_shows(graph.vs['name'],data.anime_db_stats)
+        related_dict[key] = anime_db.get_stats_of_shows(graph.vs['name'],anime_db.stats)
 
     return related_dict
-
-
-
 
 
 def create_graph_of_all_anime(): #Main function
@@ -295,10 +289,11 @@ def create_graph_of_all_anime(): #Main function
     # seasons = data.anime_df.row(9)[1:]
     # scored_shows = data.anime_df.row(2)[1:]
 
-    stats_dict = get_stats_of_shows(data.titles,["ID", "Year", "Season", "Scored", "Duration", "Episodes"])
+    stats_dict = anime_db.get_stats_of_shows(anime_db.titles,
+                                             ["ID", "Year", "Season", "Scored", "Duration", "Episodes"])
 
     relevant_ids_and_titles = [(show_stats["ID"],title) for title,show_stats in stats_dict.items()
-                               if title not in data.unlisted_titles and show_meets_conditions(show_stats)]
+                               if show_meets_conditions(show_stats)]
 
     # ids_titles_years_seasons_scored = [x for x in list(zip(ids, data.titles, release_years, seasons, scored_shows))
     #                                    if x[2] is not None and x[4] is not None and x[4] > 2000 and x[4]]
@@ -308,6 +303,8 @@ def create_graph_of_all_anime(): #Main function
 
     # relevant_titles = [x[1] for x in ids_titles_years_seasons_sorted if x[4] is not None and x[4] > 2000
     #                    and x[1] not in data.unlisted_titles]
+
+    relevant_titles = [x[1] for x in relevant_ids_and_titles]
 
 
     # for ID, MAL_title, year, season, _ in ids_titles_years_seasons_sorted:
@@ -341,7 +338,7 @@ def create_graph_of_all_anime(): #Main function
 
     related_dict = {}
     for key, graph in split_graph_dict.items():
-        related_dict[key] = get_stats_of_shows(graph.vs['name'], data.anime_db_stats)
+        related_dict[key] = anime_db.get_stats_of_shows(graph.vs['name'], anime_db.stats)
 
     save_pickled_file("related_dict_final.pickle", related_dict)
 
@@ -353,7 +350,8 @@ def create_graph_of_all_anime(): #Main function
 
 
 if __name__ == '__main__':
-    data=Data()
+    user_db = UserDB()
+    anime_db = AnimeDB()
     # url = 'https://api.myanimelist.net/v2/anime/ranking?ranking_type=all&limit=100&' \
     #       'fields=mean,num_scoring_users,num_list_users,num_episodes,average_episode_duration,' \
     #       'media_type,start_season'
@@ -361,7 +359,7 @@ if __name__ == '__main__':
     # url = 'https://api.myanimelist.net/v2/anime?q=one&limit=100'
     # response2 = get_search_results(url)
     print(5)
-    data.generate_anime_DB()
+
     # test_graph = load_pickled_file("test_graph2.pickle")
     # index_graph = test_graph["Love Live! School Idol Project"]
     # test_split = split_graph(index_graph)
@@ -370,5 +368,5 @@ if __name__ == '__main__':
 
     # graph_dict = load_pickled_file("test_graph5.pickle")
     # split_graphs(graph_dict)
-    # create_graph_of_all_anime()
+    create_graph_of_all_anime()
 

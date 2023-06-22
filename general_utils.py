@@ -9,6 +9,7 @@ from polars.exceptions import SchemaFieldNotFoundError
 try:
     import GenerateAccessToken as AccessToken
 except (ImportError, ModuleNotFoundError) as ex:
+    print(ex)
     print("Warning : GenerateAccessToken not found")
 import logging
 import polars as pl
@@ -22,6 +23,7 @@ except ImportError:
     import _thread as thread
 from colorama import Fore
 from polars.exceptions import ColumnNotFoundError
+
 
 class ErrorCauses(Enum):
     RESOURCE_LOCKED = "RESOURCE_LOCKED"
