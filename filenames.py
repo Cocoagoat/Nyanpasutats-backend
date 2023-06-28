@@ -1,7 +1,9 @@
 main_database_name = "ScoresDBFinal4.parquet"
-anime_database_name = "AnimeDB4.parquet"  # Exists for fast column name retrieval
+anime_database_name = "AnimeDB4.parquet"
 MAL_users_filename = "MALUsers4.csv"
 blacklist_users_filename = "Blacklist4.csv"
 scores_dict_filename = "ScoresDBDict4.pickle"
 tags_db_filename = "UserTagDBTest4"
 shows_tags_filename = "shows_tags_dict4.pickle"
+graphs_dict_filename = "all_graphs4.pickle"
+relations_dict_filename = "anime_relations4.pickle"

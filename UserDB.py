@@ -1,11 +1,7 @@
-import polars as pl
-
 try:
     import thread
 except ImportError:
     import _thread as thread
-from general_utils import *
-from bs4 import BeautifulSoup
 from filenames import *
 from MAL_utils import *
 from AnimeDB import AnimeDB
@@ -36,7 +32,7 @@ class UserDB:
 # │ 19    ┆ XXXXXXXXXX ┆ 7.6111   ┆ 54         ┆ … ┆ null     ┆ null       ┆ null       ┆ null       │
 # │       ┆            ┆          ┆            ┆   ┆          ┆            ┆            ┆            │
 # └───────┴────────────┴──────────┴────────────┴───┴──────────┴────────────┴────────────┴────────────┘"
-
+# (Actual amount of users in the database should be 150,000)
     def __new__(cls, *args, **kwargs):
         """The class is a Singleton - we only need one instance of it since its purpose is
         to house and create on demand all the data structures that are used in this project."""

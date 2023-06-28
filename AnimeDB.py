@@ -42,6 +42,7 @@ class AnimeDB:
         # All properties are loaded on demand
         self._df = None
         self._titles = None
+        self._partial_df = None
 
     stats = {'ID': 0, 'Mean Score': 1, 'Scores': 2, 'Members': 3, 'Episodes': 4,
              'Duration': 5, 'Type': 6, 'Year': 7, 'Season': 8}
@@ -62,13 +63,33 @@ class AnimeDB:
         return self._df
 
     @property
+    def partial_df(self):
+        if not isinstance(self._partial_df, pl.DataFrame):
+            df_dict = self.df.to_dict(as_series=False)
+            titles = [title for title, show_stats in df_dict.items()
+                                       if title!='Rows' and
+                                       self.show_meets_conditions(show_stats)]
+            _partial_df = self.df.select(["Rows"] + titles)
+        return _partial_df
+
+    def show_meets_conditions(self,show_stats: dict):
+        if int(show_stats[self.stats["Scores"]]) >= 2000 \
+                and show_stats[self.stats["Duration"]] * \
+                show_stats[self.stats["Episodes"]] >= 15\
+                and show_stats[self.stats["Duration"]]>=2\
+                and show_stats[self.stats["Year"]]>=2022:
+                # and show_stats[self.stats["Year"]]>2005:
+            return True
+        return False
+
+    @property
     def titles(self):  # change this into a normal var?
         """A list of all the anime titles."""
         if not self._titles:
             self._titles = self.df.columns[1:]  # anime_df will automatically be generated
         return self._titles
 
-    def get_stats_of_shows(self, show_list, relevant_stats):
+    def get_stats_of_shows(self, show_list, relevant_stats: list):
         """ Will create a dictionary that has every show in show_list as the key, and every stat in relevant_stats
             in a list as the value.
             Example :
@@ -89,11 +110,12 @@ class AnimeDB:
                 stats_dict[show] = show_dict
         return stats_dict
 
+    @staticmethod
     def generate_anime_DB(self, non_sequels_only=False):
         """Creates the anime database which contains data (as defined in required_fields)
         on every show"""
 
-        def create_anime_DB_entry(anime, required_fields):
+        def create_anime_DB_entry(anime):
             # Helper function, creates a list which will later serve as a column in the anime DB.
 
             def parse_start_date(date_str):

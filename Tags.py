@@ -138,6 +138,8 @@ class Tags:
         ids = anime_db.df.row(anime_db.stats['ID'])[1:]
         has_next_page = True
         page = 1
+        relevant_shows = anime_db.partial_df.columns
+
         while has_next_page:
             print(f"Currently on page {page}")
             variables = {"page": page, "isAdult": False}
@@ -150,11 +152,10 @@ class Tags:
                 except (TypeError, ValueError):
                     continue
                 title = anime_db.titles[index]  # Check this, might not be synchronized!
-                show_stats = anime_db.get_stats_of_shows([title], ["Episodes", "Duration"])
+                # show_stats = anime_db.get_stats_of_shows([title], ["Episodes", "Duration"])
                 show_recommendations = get_recommended_shows()
 
-                if show_stats[title]["Episodes"] * show_stats[title]["Duration"] >= 15 \
-                        and show_stats[title]["Duration"] >= 2:
+                if title in relevant_shows:
                     result = {
                         "Tags": [{"name": tag["name"], "percentage": tag["rank"], "category": tag["category"]} for tag
                                  in

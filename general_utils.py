@@ -84,8 +84,8 @@ def call_function_through_process(func, *args):
         if p.is_alive():
             if not q.empty():
                 value = q.get()
-                # print(f"q is not empty, value is {value}")
-                # print(type(value))
+                print(f"q is not empty, value is {value}")
+                print(type(value))
                 if isinstance(value, Sleep):
                     time_start = time_start + value.time
                     print(f"Command to sleep {value.time} seconds"
@@ -110,6 +110,7 @@ def call_function_through_process(func, *args):
         p.join()
         print(Fore.LIGHTWHITE_EX + "Process successfully finished on time")
         logger.debug("Process successfully finished on time")
+    print(f"returned value is {value}")
     return value
 
 
@@ -326,6 +327,15 @@ def save_pickled_file(filename,obj):
         pickle.dump(obj, file)
 
 
+def count_calls(func):
+    def wrapped(*args, **kwargs):
+        wrapped.calls += 1
+        print(f'Call {wrapped.calls} of {func.__name__!r}')
+        return func(*args, **kwargs)
+    wrapped.calls = 0
+    return wrapped
+
+
 def get_search_results(url, q=None):
     """ The main "get" function, tweaked to automatically handle various errors as the
     main program needs to run several days without stopping
@@ -354,8 +364,9 @@ def get_search_results(url, q=None):
 
     for _ in range(10):
         try:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=15)
             print(response.status_code)
+            print(response.json())
         except SSLError:
             # Sometimes MAL throws a weird SSL error, retrying fixes it
             time.sleep(Sleep.SHORT_SLEEP)
@@ -423,7 +434,7 @@ def get_search_results(url, q=None):
             # If we're calling the function through a separate process, we want
             # to pass it our return value through the queue.
             print("Putting json into queue")
-            logger.debug(f"Response before putting its json into queue : {response}")
+            print(f"Response before putting its json into queue : {response.json()}")
             q.put(response.json())
         return response.json()
     except (JSONDecodeError, AttributeError) as ex:
@@ -476,7 +487,7 @@ def filter_rows_by_column_values(df,col_name, bad_values_list):
         pl.col("Username").apply(lambda x: x not in bad_values_list, return_dtype=pl.Boolean))
 
 
-def reindex_df(df):
+def reindex_df(df : pl.DataFrame):
     """Saved for future use"""
     try:
         df.drop('Index')
@@ -535,7 +546,7 @@ def concat_to_existing_dict(dict1_filename,dict2,concat_type):
     save_pickled_file(dict1_filename, dict1)
 
 
-def remove_zero_columns(df):
+def remove_zero_columns(df : pl.DataFrame):
     zero_columns = [col for col in df.columns if df[col].sum() == 0]
     for col in zero_columns:
         if col.endswith("Affinity"):

@@ -2,8 +2,8 @@ from AnimeDB import AnimeDB
 from UserDB import UserDB
 from Tags import Tags
 from filenames import *
-from general_utils import *
 from MAL_utils import *
+from Graphs import Graphs
 
 
 class AffinityDB:
@@ -21,6 +21,7 @@ class AffinityDB:
         self._df = None
         self.anime_df = AnimeDB()
         self.tags = Tags()
+        self.graphs = Graphs()
 
     @property
     def df(self):
@@ -36,8 +37,7 @@ class AffinityDB:
                 self._df = pl.read_parquet(f"{tags_db_filename}.parquet")
         return self._df
 
-    @staticmethod
-    def create_affinity_DB():
+    def create_affinity_DB(self):
 
         def calculate_affinities_of_user(user_index):
 
@@ -77,9 +77,43 @@ class AffinityDB:
             # ^ A dictionary that will store, for each tag, all the shows that have said tag.
 
             user_show_list = []
+            processed_shows = []
 
             # Now, we will loop over every show that the user has watched
             for show, user_score in user_scores.items():
+
+                if show in processed_shows:
+                    continue
+
+                show_related_entries = self.graphs.find_related_entries(show)
+                stats_of_related_entries = anime_db.get_stats_of_shows(show_related_entries,
+                                                                       ["Episodes", "Duration"])
+
+                # all_entries_tags_list = list(set([tag for entry in show_related_entries
+                #                              for tag in tags.shows_tags_dict[entry]['Tags']]))
+
+                all_entries_tags_list = [{tag['name']: tag['percentage']} for entry in show_related_entries
+                                         for tag in self.tags.shows_tags_dict[entry]['Tags']]
+
+                for tag in all_entries_tags_list:
+                    max_tag_value = max()
+                for entry in show_related_entries:
+                    length_coeff = min(1, stats_of_related_entries[show]["Episodes"] *
+                                       stats_of_related_entries[show]["Duration"]/200)
+                    show_count += length_coeff
+
+
+                    # for tag in entry_tags_list:
+                    #     if tag['name'] not in tags.all_tags_list:
+                    #         continue
+                    #     adjusted_p = tags.adjust_tag_percentage(tag)
+                    #     if adjusted_p == 0:
+                    #         break
+                # user_score_per_tag[tag['name']] += user_score * adjusted_p
+                # MAL_score_per_tag[tag['name']] += MAL_score * adjusted_p
+                # user_tag_counts[tag['name']] += adjusted_p
+                # tag_show_list[tag['name']].append(show)
+
                 if user_scores[show]:
 
                     user_show_list.append(show)
@@ -229,6 +263,7 @@ class AffinityDB:
         user_db = UserDB()
         anime_db = AnimeDB()
         tags = Tags()
+        graphs = Graphs()
         relevant_shows = list(tags.shows_tags_dict.keys())
         # The shows in our tags dict are the ones filtered when creating it
         # ( >= 15 min in length, >= 2 min per ep)
