@@ -218,14 +218,15 @@ class Graphs:
 
     def find_related_entries(self, show_name):
         if show_name in self.related_shows.keys():
-            return self.related_shows[show_name]
+            return show_name, self.related_shows[show_name]
         else:
             # It's more efficient to search through the keys first,
             # since keys are the root entry for each show, and most shows
             # only have one major entry (one season/movie).
             for root_name in self.related_shows.keys():
                 if show_name in self.related_shows[root_name]:
-                    return self.related_shows[root_name]
+                    return root_name, self.related_shows[root_name]
+
 
     def create_graph_of_all_anime(self):  # Main function
 

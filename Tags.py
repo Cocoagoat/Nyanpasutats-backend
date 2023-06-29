@@ -2,6 +2,7 @@ from filenames import *
 from general_utils import *
 from MAL_utils import *
 from AnimeDB import AnimeDB
+from Graphs import Graphs
 
 
 class Tags:
@@ -59,7 +60,10 @@ class Tags:
     def __init__(self):
         # All properties are loaded on demand
         self._shows_tags_dict = {}
+        self._shows_tags_dict2 = {}
+        self.anime_db = AnimeDB()
         self._all_tags_list = OrderedSet()
+        self.graphs = Graphs()
 
     @property
     def all_tags_list(self):
@@ -78,6 +82,18 @@ class Tags:
                 print("Shows-tags dictionary not found. Creating new shows-tags dictionary")
                 self.get_shows_tags()
         return self._shows_tags_dict
+
+    @property
+    def shows_tags_dict2(self):
+        if not self._shows_tags_dict2:
+            try:
+                print("Loading shows-tags2 dictionary")
+                self._shows_tags_dict2 = load_pickled_file(shows_tags_filename2)
+                print("Shows-tags2 dictionary loaded successfully")
+            except FileNotFoundError:
+                print("Shows-tags2 dictionary not found. Creating new shows-tags dictionary")
+                self.get_shows_tags2()
+        return self._shows_tags_dict2
 
     def get_full_tags_list(self):
         # Gets list of all tags + counts amount of show per studio
@@ -174,6 +190,93 @@ class Tags:
 
         save_pickled_file(shows_tags_filename, self._shows_tags_dict)
 
+    def get_shows_tags2(self):
+        def calc_length_coeff(entry, stats):
+            return round(min(1, stats[entry]["Episodes"] *
+                       stats[entry]["Duration"] / 200),3)
+
+        processed_titles = []
+
+        for i, show in enumerate(self.shows_tags_dict.keys()):
+
+            show_amount = len(self.shows_tags_dict.keys())
+            # print(show)
+            if i%100==0:
+                print(f"Currently on show {i} of {show_amount}")
+
+            if show in processed_titles:
+                continue
+
+            try:
+                main_entry, show_related_entries = self.graphs.find_related_entries(show)
+            except TypeError:
+                continue
+
+            # Some entries exist on MAL, but not on Anilist (and thus they do not appear
+            # in the tags dictionary which is built using Anilist's tags). Those entries
+            # are all either recaps, commercials or other side entries that we normally
+            # would not want to analyze either way.
+            show_related_entries = [entry for entry in show_related_entries
+                                    if entry in self.shows_tags_dict.keys()]
+
+            all_entries_tags_list = [{tag['name']: tag['percentage']} for entry in show_related_entries
+                                     for tag in self.shows_tags_dict[entry]['Tags']]
+
+            # length_coeff = calc_length_coeff(entry, stats_of_related_entries)
+            self._shows_tags_dict2[main_entry] = {}
+
+            # Tags
+            show_tags = {}
+            for d in all_entries_tags_list:
+                for key, value in d.items():
+                    if key not in show_tags or value > show_tags[key]:
+                        show_tags[key] = value
+            show_tags = {tag[0]: tag[1] for tag in sorted(show_tags.items(),
+                                                          key=lambda x: x[1], reverse=True)}
+
+            self._shows_tags_dict2[main_entry]['Tags'] = []
+            for name, percentage in show_tags.items():
+                self._shows_tags_dict2[main_entry]['Tags'].append({'name': name, 'percentage': percentage})
+
+            # Genres
+            show_genres = list(set([genre for entry in show_related_entries
+                                    for genre in self.shows_tags_dict[entry]['Genres']]))
+            self._shows_tags_dict2[main_entry]['Genres'] = show_genres
+
+            # Studios
+            show_studios = {entry: self.shows_tags_dict[entry]['Studio'] for entry in show_related_entries}
+            self._shows_tags_dict2[main_entry]['Studios'] = show_studios
+
+            # Recommended
+            show_recommended={}
+            for entry in show_related_entries:
+                entry_recommended = self.shows_tags_dict[entry]['Recommended']
+                for key, value in entry_recommended.items():
+                    if key not in show_recommended:
+                        show_recommended[key] = value
+                    else:
+                        show_recommended[key] += value
+
+            sorted_recommended_shows = sorted(show_recommended.items(),
+                                              reverse=True, key=lambda x: x[1])[0:5]
+            show_recommended = {rec[0]: rec[1] for rec in sorted(sorted_recommended_shows,
+                                                                 key=lambda x: x[1], reverse=True)}
+            self._shows_tags_dict2[main_entry]['Recommended'] = show_recommended
+
+            # Related
+            stats_of_related_entries = self.anime_db.get_stats_of_shows(show_related_entries,
+                                                                        ["Episodes", "Duration"])
+            related = {}
+            for entry in show_related_entries:
+                length_coeff = calc_length_coeff(entry, stats_of_related_entries)
+                related[entry] = length_coeff
+            self._shows_tags_dict2[main_entry]['Related'] = related
+
+            # To avoid repeat processing
+            processed_titles = processed_titles + show_related_entries
+
+        save_pickled_file(shows_tags_filename2, self._shows_tags_dict2)
+
     @staticmethod
     def get_tag_index(tag_name, show_tags_list):
         for i, tag in enumerate(show_tags_list):
@@ -182,17 +285,17 @@ class Tags:
         return -1
 
     @staticmethod
-    def adjust_tag_percentage(tag):
-        p = tag['percentage']
+    def adjust_tag_percentage(p):
+        # p = tag['percentage']
         if p >= 85:
-            adjusted_p = round((tag['percentage'] / 100), 3)
+            adjusted_p = round((p / 100), 3)
         elif p >= 70:
-            second_coeff = 20 / 3 - tag['percentage'] / 15  # Can be a number from 1 to 1.5
-            adjusted_p = round((tag['percentage'] / 100) ** second_coeff, 3)
+            second_coeff = 20 / 3 - p / 15  # Can be a number from 1 to 1.5
+            adjusted_p = round((p / 100) ** second_coeff, 3)
             # 85 ---> 1, 70 ---> 2, 15 forward means -1 so m=-1/15, y-2 = -1/15(x-70) --> y=-1/15x + 20/3
         elif p >= 60:
-            second_coeff = 16 - tag['percentage'] / 5
-            adjusted_p = round((tag['percentage'] / 100) ** second_coeff, 3)
+            second_coeff = 16 - p / 5
+            adjusted_p = round((p / 100) ** second_coeff, 3)
         else:
             adjusted_p = 0
         return adjusted_p
