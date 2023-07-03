@@ -1,4 +1,6 @@
 from __future__ import print_function
+
+import http.client
 from http import HTTPStatus
 import numpy as np
 import requests
@@ -16,6 +18,7 @@ import polars as pl
 import csv
 import sys
 from requests.exceptions import SSLError, JSONDecodeError
+from urllib3.exceptions import ProtocolError, ConnectionError
 import multiprocessing as mp
 try:
     import thread
@@ -367,10 +370,11 @@ def get_search_results(url, q=None):
             response = requests.get(url, headers=headers, timeout=15)
             print(response.status_code)
             print(response.json())
-        except SSLError:
+        except (SSLError, ConnectionError, http.client.RemoteDisconnected, ProtocolError, ConnectionResetError) as e:
             # Sometimes MAL throws a weird SSL error, retrying fixes it
             time.sleep(Sleep.SHORT_SLEEP)
-            logger.debug("SSL Error, retrying connection")
+            print("Error, retrying connection")
+            logger.debug("Error, retrying connection")
             continue
         break
 

@@ -59,41 +59,41 @@ class Tags:
 
     def __init__(self):
         # All properties are loaded on demand
-        self._shows_tags_dict = {}
-        self._shows_tags_dict2 = {}
+        self._entry_tags_dict = {}
+        self._show_tags_dict = {}
         self.anime_db = AnimeDB()
-        self._all_tags_list = OrderedSet()
+        self._all_anilist_tags = OrderedSet()
         self.graphs = Graphs()
 
     @property
-    def all_tags_list(self):
-        if not self._all_tags_list:
+    def all_anilist_tags(self):
+        if not self._all_anilist_tags:
             self.get_full_tags_list()
-        return self._all_tags_list
+        return self._all_anilist_tags
 
     @property
-    def shows_tags_dict(self):
-        if not self._shows_tags_dict:
+    def entry_tags_dict(self):
+        if not self._entry_tags_dict:
+            try:
+                print("Loading entry-tags dictionary")
+                self._entry_tags_dict = load_pickled_file(entry_tags_filename)
+                print("Entry-tags dictionary loaded successfully")
+            except FileNotFoundError:
+                print("Entry-tags dictionary not found. Creating new shows-tags dictionary")
+                self.get_entry_tags()
+        return self._entry_tags_dict
+
+    @property
+    def show_tags_dict(self):
+        if not self._show_tags_dict:
             try:
                 print("Loading shows-tags dictionary")
-                self._shows_tags_dict = load_pickled_file(shows_tags_filename)
+                self._show_tags_dict = load_pickled_file(shows_tags_filename)
                 print("Shows-tags dictionary loaded successfully")
             except FileNotFoundError:
                 print("Shows-tags dictionary not found. Creating new shows-tags dictionary")
                 self.get_shows_tags()
-        return self._shows_tags_dict
-
-    @property
-    def shows_tags_dict2(self):
-        if not self._shows_tags_dict2:
-            try:
-                print("Loading shows-tags2 dictionary")
-                self._shows_tags_dict2 = load_pickled_file(shows_tags_filename2)
-                print("Shows-tags2 dictionary loaded successfully")
-            except FileNotFoundError:
-                print("Shows-tags2 dictionary not found. Creating new shows-tags dictionary")
-                self.get_shows_tags2()
-        return self._shows_tags_dict2
+        return self._show_tags_dict
 
     def get_full_tags_list(self):
         # Gets list of all tags + counts amount of show per studio
@@ -102,14 +102,14 @@ class Tags:
         with open("NSFWTags.txt", 'r') as file:
             banned_tags = file.read().splitlines()
 
-        for show, show_dict in self.shows_tags_dict.items():
+        for show, show_dict in self.entry_tags_dict.items():
             if 'Tags' in show_dict:
                 for tag_dict in show_dict['Tags']:
                     if tag_dict['name'] not in banned_tags:
-                        self._all_tags_list.add(tag_dict['name'])
+                        self._all_anilist_tags.add(tag_dict['name'])
             if 'Genres' in show_dict.keys():
                 for genre in show_dict['Genres']:
-                    self._all_tags_list.add(genre)
+                    self._all_anilist_tags.add(genre)
             if 'Studio' in show_dict.keys():
                 if show_dict['Studio']:
                     if show_dict['Studio'] not in studio_dict:
@@ -122,11 +122,11 @@ class Tags:
         # Only keeps studios that have over 30 shows or are in extra_studios
         for studio, amount_of_shows in studio_dict.items():
             if amount_of_shows >= 30 or studio in extra_studios:
-                self._all_tags_list.add(studio)
+                self._all_anilist_tags.add(studio)
 
-        self._all_tags_list = list(self._all_tags_list)
+        self._all_anilist_tags = list(self._all_anilist_tags)
 
-    def get_shows_tags(self):
+    def get_entry_tags(self):
         def get_recommended_shows():
             try:
                 sorted_recs = sorted(media['recommendations']['nodes'], key=lambda x: x['rating'], reverse=True)
@@ -172,43 +172,50 @@ class Tags:
                 show_recommendations = get_recommended_shows()
 
                 if title in relevant_shows:
+                    try:
+                        main_entry, _ = self.graphs.find_related_entries(title)
+                    except TypeError:
+                        continue
+
                     result = {
-                        "Tags": [{"name": tag["name"], "percentage": tag["rank"], "category": tag["category"]} for tag
-                                 in
-                                 media["tags"]],
+                        "Tags": [{"name": tag["name"], "percentage": tag["rank"],
+                                  "category": tag["category"]} for tag in media["tags"]],
                         "Genres": media["genres"],
                         "Studio": media["studios"]["nodes"][0]["name"] if media["studios"]["nodes"] else None,
-                        "Recommended": show_recommendations
+                        "Recommended": show_recommendations,
+                        "Main": main_entry
                         # If recs amount less than 25 start penalizing?
                     }
 
                     # Separate studios from tags, genres too maybe?
-                    self._shows_tags_dict[title] = result
+                    self._entry_tags_dict[title] = result
             has_next_page = response["data"]["Page"]["pageInfo"]["hasNextPage"]
             page = page + 1
             time.sleep(1)
 
-        save_pickled_file(shows_tags_filename, self._shows_tags_dict)
+        del self._entry_tags_dict['Black Clover: Mahou Tei no Ken']
+        save_pickled_file(entry_tags_filename, self._entry_tags_dict)
 
-    def get_shows_tags2(self):
+    def get_shows_tags(self):
         def calc_length_coeff(entry, stats):
             return round(min(1, stats[entry]["Episodes"] *
                        stats[entry]["Duration"] / 200),3)
 
         processed_titles = []
 
-        for i, show in enumerate(self.shows_tags_dict.keys()):
+        for i, entry in enumerate(self.entry_tags_dict.keys()):
 
-            show_amount = len(self.shows_tags_dict.keys())
+            show_amount = len(self.entry_tags_dict.keys())
             # print(show)
             if i%100==0:
                 print(f"Currently on show {i} of {show_amount}")
+                # raise ValueError
 
-            if show in processed_titles:
+            if entry in processed_titles:
                 continue
 
             try:
-                main_entry, show_related_entries = self.graphs.find_related_entries(show)
+                main_entry, show_related_entries = self.graphs.find_related_entries(entry)
             except TypeError:
                 continue
 
@@ -217,13 +224,13 @@ class Tags:
             # are all either recaps, commercials or other side entries that we normally
             # would not want to analyze either way.
             show_related_entries = [entry for entry in show_related_entries
-                                    if entry in self.shows_tags_dict.keys()]
+                                    if entry in self.entry_tags_dict.keys()]
 
             all_entries_tags_list = [{tag['name']: tag['percentage']} for entry in show_related_entries
-                                     for tag in self.shows_tags_dict[entry]['Tags']]
+                                     for tag in self.entry_tags_dict[entry]['Tags']]
 
             # length_coeff = calc_length_coeff(entry, stats_of_related_entries)
-            self._shows_tags_dict2[main_entry] = {}
+            self._show_tags_dict[main_entry] = {}
 
             # Tags
             show_tags = {}
@@ -234,23 +241,23 @@ class Tags:
             show_tags = {tag[0]: tag[1] for tag in sorted(show_tags.items(),
                                                           key=lambda x: x[1], reverse=True)}
 
-            self._shows_tags_dict2[main_entry]['Tags'] = []
+            self._show_tags_dict[main_entry]['Tags'] = []
             for name, percentage in show_tags.items():
-                self._shows_tags_dict2[main_entry]['Tags'].append({'name': name, 'percentage': percentage})
+                self._show_tags_dict[main_entry]['Tags'].append({'name': name, 'percentage': percentage})
 
             # Genres
             show_genres = list(set([genre for entry in show_related_entries
-                                    for genre in self.shows_tags_dict[entry]['Genres']]))
-            self._shows_tags_dict2[main_entry]['Genres'] = show_genres
+                                    for genre in self.entry_tags_dict[entry]['Genres']]))
+            self._show_tags_dict[main_entry]['Genres'] = show_genres
 
             # Studios
-            show_studios = {entry: self.shows_tags_dict[entry]['Studio'] for entry in show_related_entries}
-            self._shows_tags_dict2[main_entry]['Studios'] = show_studios
+            show_studios = {entry: self.entry_tags_dict[entry]['Studio'] for entry in show_related_entries}
+            self._show_tags_dict[main_entry]['Studios'] = show_studios
 
             # Recommended
             show_recommended={}
             for entry in show_related_entries:
-                entry_recommended = self.shows_tags_dict[entry]['Recommended']
+                entry_recommended = self.entry_tags_dict[entry]['Recommended']
                 for key, value in entry_recommended.items():
                     if key not in show_recommended:
                         show_recommended[key] = value
@@ -261,7 +268,7 @@ class Tags:
                                               reverse=True, key=lambda x: x[1])[0:5]
             show_recommended = {rec[0]: rec[1] for rec in sorted(sorted_recommended_shows,
                                                                  key=lambda x: x[1], reverse=True)}
-            self._shows_tags_dict2[main_entry]['Recommended'] = show_recommended
+            self._show_tags_dict[main_entry]['Recommended'] = show_recommended
 
             # Related
             stats_of_related_entries = self.anime_db.get_stats_of_shows(show_related_entries,
@@ -270,12 +277,17 @@ class Tags:
             for entry in show_related_entries:
                 length_coeff = calc_length_coeff(entry, stats_of_related_entries)
                 related[entry] = length_coeff
-            self._shows_tags_dict2[main_entry]['Related'] = related
+            self._show_tags_dict[main_entry]['Related'] = related
+
+            # Add main show to entry_dict
+            for entry in show_related_entries:
+                self._entry_tags_dict[entry]['Main'] = main_entry
 
             # To avoid repeat processing
             processed_titles = processed_titles + show_related_entries
 
-        save_pickled_file(shows_tags_filename2, self._shows_tags_dict2)
+        save_pickled_file(shows_tags_filename, self._show_tags_dict)
+        # save_pickled_file(entry_tags_filename, self._entry_tags_dict)
 
     @staticmethod
     def get_tag_index(tag_name, show_tags_list):
@@ -300,15 +312,4 @@ class Tags:
             adjusted_p = 0
         return adjusted_p
 
-    @staticmethod
-    def load_tags_database():
-        print(f"Unpacking part 1 of database")
-        tag_df = pl.read_parquet(f"{tags_db_filename}-P1.parquet")
-        for i in range(2, 1000):
-            try:
-                print(f"Unpacking part {i} of database")
-                temp_df = pl.read_parquet(f"{tags_db_filename}-P{i}.parquet")
-                tag_df = tag_df.vstack(temp_df)
-            except FileNotFoundError:
-                break
-        return tag_df
+

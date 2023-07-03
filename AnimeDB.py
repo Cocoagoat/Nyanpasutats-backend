@@ -77,7 +77,7 @@ class AnimeDB:
                 and show_stats[self.stats["Duration"]] * \
                 show_stats[self.stats["Episodes"]] >= 15\
                 and show_stats[self.stats["Duration"]]>=2\
-                and show_stats[self.stats["Year"]]>=2022:
+                and show_stats[self.stats["Mean Score"]]>=6.5:
                 # and show_stats[self.stats["Year"]]>2005:
             return True
         return False

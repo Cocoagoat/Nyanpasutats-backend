@@ -30,21 +30,43 @@ class AffinityDB:
         if not isinstance(self._df, pl.DataFrame):
             try:
                 print("Loading affinity database")
-                self._df = pl.read_parquet(f"{tags_db_filename}.parquet")
+                self._df = pl.read_parquet(f"{aff_db_filename}.parquet")
             except FileNotFoundError:
                 print("Affinity database not found. Creating new affinity database")
                 self.create_affinity_DB()
-                self._df = pl.read_parquet(f"{tags_db_filename}.parquet")
+                self._df = pl.read_parquet(f"{aff_db_filename}.parquet")
         return self._df
+
+    @staticmethod
+    def load_affinity_DB():
+        print(f"Unpacking part 1 of database")
+        tag_df = pl.read_parquet(f"{aff_db_filename}-P1.parquet")
+        for i in range(2, 1000):
+            try:
+                print(f"Unpacking part {i} of database")
+                temp_df = pl.read_parquet(f"{aff_db_filename}-P{i}.parquet")
+                tag_df = tag_df.vstack(temp_df)
+            except FileNotFoundError:
+                break
+        return tag_df
 
     def create_affinity_DB(self):
 
         def calculate_affinities_of_user(user_index):
 
+            # Entry refers to a single MAL entry. "Show" refers to a full show, consisting of several entries.
+            # For example, "Attack on Titan Season 2" is an entry. "Attack on Titan" can refer both to the entry
+            # (S1 of the show) or the show which consists of all entries related to "Attack on Titan".
+            # See Tags class for more info.
+
+            # def calculate_length_coeff(entry, stats):
+            #     return min(1, stats[entry]["Episodes"] *
+            #                        stats[entry]["Duration"] / 200)
+
             nonlocal user_tag_affinity_dict
             nonlocal database_dict
 
-            save_data_per = 10  # Each batch of N users will be separated into their own mini-database during
+            save_data_per = 10000  # Each batch of N users will be separated into their own mini-database during
             # runtime to avoid blowing up my poor 32GB of RAM
             show_count = 0
 
@@ -63,79 +85,72 @@ class AffinityDB:
             user_mean_of_watched = np.mean(watched_user_score_list)
             user_std_of_watched = np.std(watched_user_score_list)
 
-            user_tag_affinity_dict[user_name] = {tag_name: 0 for tag_name in tags.all_tags_list}
+            user_tag_affinity_dict[user_name] = {tag_name: 0 for tag_name in tags.all_anilist_tags}
+            user_tag_pos_affinity_dict[user_name] = {tag_name: 0 for tag_name in tags.all_anilist_tags}
             # ^ A dictionary that will store, for each user, their affinity to each of the 300+ tags we have
 
-            user_tag_counts = {tag_name: 0 for tag_name in tags.all_tags_list}
+            user_tag_counts = {tag_name: 0 for tag_name in tags.all_anilist_tags}
             # ^ This dictionary will store the WEIGHTED (by each tag's percentage) tag count for each tag.
 
-            MAL_score_per_tag = {tag_name: 0 for tag_name in tags.all_tags_list}
-            user_score_per_tag = {tag_name: 0 for tag_name in tags.all_tags_list}
+            MAL_score_per_tag = {tag_name: 0 for tag_name in tags.all_anilist_tags}
+            user_score_per_tag = {tag_name: 0 for tag_name in tags.all_anilist_tags}
+            positive_aff_per_tag = {tag_name: 0 for tag_name in tags.all_anilist_tags}
             # ^ The above two are for calculating the average scores per tag later (both user and MAL averages)
 
-            tag_show_list = {tag_name: [] for tag_name in tags.all_tags_list}
+            tag_entry_list = {tag_name: [] for tag_name in tags.all_anilist_tags}
+            pos_tag_entry_list = {tag_name: [] for tag_name in tags.all_anilist_tags}
             # ^ A dictionary that will store, for each tag, all the shows that have said tag.
 
-            user_show_list = []
-            processed_shows = []
+            user_entry_list = []
+
+            processed_entries = []
+            try:
+                x = int(np.ceil(user_mean_of_watched))
+            except ValueError:
+                return
+
+            score_diffs = [score - user_mean_of_watched for score in range(10,x-1,-1)]
+            exp_coeffs = [1 / 2 ** (10 - exp) * score_diffs[10 - exp] for exp in range(10,x-1,-1)]
+            # k = [score - user_mean_of_watched for score in range(10,x-1)]
+            # exp_coeff = [1/2**(exp-x)/k[11-x] for exp in range(x, 11)]
 
             # Now, we will loop over every show that the user has watched
-            for show, user_score in user_scores.items():
-
-                if show in processed_shows:
+            for entry, user_score in user_scores.items():
+                if not user_score or entry in processed_entries:
                     continue
 
-                show_related_entries = self.graphs.find_related_entries(show)
-                stats_of_related_entries = anime_db.get_stats_of_shows(show_related_entries,
-                                                                       ["Episodes", "Duration"])
+                main_show = self.tags.entry_tags_dict[entry]['Main']
+                main_show_data = self.tags.show_tags_dict[main_show]
+                user_watched_entries_length_coeffs = [x[1] for x in
+                                                      main_show_data['Related'].items()
+                                                      if user_scores[x[0]]]
 
-                # all_entries_tags_list = list(set([tag for entry in show_related_entries
-                #                              for tag in tags.shows_tags_dict[entry]['Tags']]))
+                sum_of_length_coeffs = sum(user_watched_entries_length_coeffs)
 
-                all_entries_tags_list = [{tag['name']: tag['percentage']} for entry in show_related_entries
-                                         for tag in self.tags.shows_tags_dict[entry]['Tags']]
+                for related_entry, length_coeff in main_show_data['Related'].items():
 
-                for tag in all_entries_tags_list:
-                    max_tag_value = max()
-                for entry in show_related_entries:
-                    length_coeff = min(1, stats_of_related_entries[show]["Episodes"] *
-                                       stats_of_related_entries[show]["Duration"]/200)
-                    show_count += length_coeff
-
-
-                    # for tag in entry_tags_list:
-                    #     if tag['name'] not in tags.all_tags_list:
-                    #         continue
-                    #     adjusted_p = tags.adjust_tag_percentage(tag)
-                    #     if adjusted_p == 0:
-                    #         break
-                # user_score_per_tag[tag['name']] += user_score * adjusted_p
-                # MAL_score_per_tag[tag['name']] += MAL_score * adjusted_p
-                # user_tag_counts[tag['name']] += adjusted_p
-                # tag_show_list[tag['name']].append(show)
-
-                if user_scores[show]:
-
-                    user_show_list.append(show)
-                    MAL_score = mean_score_row[show].item()
-
-                    if MAL_score < 6.5:
+                    processed_entries.append(related_entry)
+                    user_score = user_scores[related_entry]
+                    if not user_score:
                         continue
-                        # We don't want to base decisions on a person's affinity to certain types of shows
-                        # on shows that are widely considered bad - for example, a romance fan won't necessarily
-                        # like a bad romance show more than someone indifferent towards romance shows.
 
-                    show_count += 1
-                    MAL_score_coeff = (-3 / 8) * MAL_score + 31 / 8
+                    length_coeff = length_coeff/sum_of_length_coeffs
 
-                    show_tags_list = tags.shows_tags_dict[show]['Tags']
-                    show_genres_list = tags.shows_tags_dict[show]['Genres']
-                    show_studio = tags.shows_tags_dict[show]['Studio']
+                    MAL_score = mean_score_row[related_entry].item()
+                    if MAL_score < 6.5:
+                        print("Warning - MAL score lower than 6.5")
+                        continue
 
-                    for tag in show_tags_list:
-                        if tag['name'] not in tags.all_tags_list:
+                    user_entry_list.append(related_entry)
+
+                    show_count += length_coeff
+                    # MAL_score_coeff = (-3 / 8) * MAL_score + 31 / 8
+                    MAL_score_coeff = -0.6 * MAL_score + 5.9
+
+                    for tag in tags.entry_tags_dict[related_entry]['Tags']:
+                        if tag['name'] not in tags.all_anilist_tags:
                             continue
-                        adjusted_p = tags.adjust_tag_percentage(tag)
+                        adjusted_p = tags.adjust_tag_percentage(tag['percentage'])
                         # On Anilist, every tag a show has is listed with a percentage. This percentage
                         # can be pushed down or up a bit by any registered user, so as a variable it
                         # inevitably introduces human error - a tag with 60% means that not all users agree
@@ -144,29 +159,45 @@ class AffinityDB:
                         if adjusted_p == 0:
                             break
 
-                        user_score_per_tag[tag['name']] += user_score * adjusted_p
-                        MAL_score_per_tag[tag['name']] += MAL_score * adjusted_p
-                        user_tag_counts[tag['name']] += adjusted_p
-                        tag_show_list[tag['name']].append(show)
+                        user_score_per_tag[tag['name']] += user_score * adjusted_p * length_coeff
+                        MAL_score_per_tag[tag['name']] += MAL_score * adjusted_p * length_coeff
+                        user_tag_counts[tag['name']] += adjusted_p * length_coeff
+                        tag_entry_list[tag['name']].append(related_entry)
 
-                    for genre in show_genres_list:
-                        user_score_per_tag[genre] += user_score
-                        MAL_score_per_tag[genre] += MAL_score
-                        user_tag_counts[genre] += 1
+                        if user_score >= user_mean_of_watched:
+                            positive_aff_per_tag[tag['name']] += MAL_score_coeff * exp_coeffs[10-user_score]\
+                                                                 * adjusted_p * length_coeff
+                            pos_tag_entry_list[tag['name']].append(related_entry)
+
+                    for genre in tags.entry_tags_dict[entry]['Genres']:
+                        user_score_per_tag[genre] += user_score * length_coeff
+                        MAL_score_per_tag[genre] += MAL_score * length_coeff
+                        user_tag_counts[genre] += length_coeff
                         # Genres and studios do not have percentages, so we add 1 as if p=100
-                        tag_show_list[genre].append(show)
+                        tag_entry_list[genre].append(related_entry)
 
-                    if show_studio in tags.all_tags_list:
-                        user_score_per_tag[show_studio] += user_score
-                        MAL_score_per_tag[show_studio] += MAL_score
-                        user_tag_counts[show_studio] += 1
-                        tag_show_list[show_studio].append(show)
+                        if user_score >= user_mean_of_watched:
+                            positive_aff_per_tag[genre] += MAL_score_coeff * exp_coeffs[10-user_score]\
+                                                           * length_coeff
+                            pos_tag_entry_list[genre].append(related_entry)
+
+                    show_studio = tags.entry_tags_dict[related_entry]['Studio']
+                    if show_studio in tags.all_anilist_tags:
+                        user_score_per_tag[show_studio] += user_score * length_coeff
+                        MAL_score_per_tag[show_studio] += MAL_score * length_coeff
+                        user_tag_counts[show_studio] += length_coeff
+                        tag_entry_list[show_studio].append(related_entry)
+
+                        if user_score >= user_mean_of_watched:
+                            positive_aff_per_tag[show_studio] += MAL_score_coeff * exp_coeffs[10-user_score]\
+                                                                 * length_coeff
+                            pos_tag_entry_list[show_studio].append(related_entry)
 
             # The above loop = func1? First put everything in classes tho
 
             # After calculating the total scores for each tag, we calculate the "affinity" of the user
             # to each tag.
-            for tag in tags.all_tags_list:
+            for tag in tags.all_anilist_tags:
                 try:
                     tag_overall_ratio = user_tag_counts[tag] / show_count
                     freq_coeff = min(1, max(user_tag_counts[tag] / 10, tag_overall_ratio * 20))
@@ -175,36 +206,39 @@ class AffinityDB:
                     user_tag_diff = user_score_per_tag[tag] / user_tag_counts[tag] - user_mean_of_watched
                     MAL_tag_diff = MAL_score_per_tag[tag] / user_tag_counts[tag] - MAL_mean_of_watched
                     user_tag_affinity_dict[user_name][tag] = (2 * user_tag_diff - MAL_tag_diff) * freq_coeff
+                    user_tag_pos_affinity_dict[user_name][tag] = (positive_aff_per_tag[tag]/user_tag_counts[tag])\
+                                                                 *freq_coeff
 
                 except ZeroDivisionError:
                     user_tag_affinity_dict[user_name][tag] = 0
 
-            user_tag_affinity_dict[user_name]['Shows'] = user_show_list
+            user_tag_affinity_dict[user_name]['Shows'] = user_entry_list
+
 
             # Whatever is above - func2 (create_user_tag_affinity_dict? also draw it in the comments)
             # Now we choose 20 random shows from the user's list. Each show will give us an entry in the final
             # database. Each entry will consist of the user's affinities to each genre, their
-            random.shuffle(user_show_list)
-            user_shows_sample = user_show_list[0:20]
+            random.shuffle(user_entry_list)
+            user_sample = user_entry_list[0:20]
 
-            for show in user_shows_sample:
-                show_tags_list = tags.shows_tags_dict[show]['Tags']
-                show_genres_list = tags.shows_tags_dict[show]['Genres']
-                show_studio = tags.shows_tags_dict[show]['Studio']
+            for entry in user_sample:
+                entry_tags_list = tags.entry_tags_dict[entry]['Tags']
+                entry_genres_list = tags.entry_tags_dict[entry]['Genres']
+                entry_studio = tags.entry_tags_dict[entry]['Studio']
 
                 # On Anilist, every show has other shows that are recommended by users. The "rating"
                 # is how many users recommended it. We want to create a "Recommended Shows Affinity" column
                 # while taking the weighted average of the user's affinities to the recommended shows.
                 # The weight of each show is it's rating/total rating of all recommended shows.
 
-                total_rec_rating = sum([rating for title, rating in tags.shows_tags_dict[show]['Recommended'].items()])
-                recommended_shows = tags.shows_tags_dict[show]['Recommended']
+                total_rec_rating = sum([rating for title, rating in tags.entry_tags_dict[entry]['Recommended'].items()])
+                recommended_shows = tags.entry_tags_dict[entry]['Recommended']
                 rec_affinity = 0
 
                 for rec_anime, rec_rating in recommended_shows.items():
                     if rec_anime in relevant_shows and user_scores[rec_anime] and rec_rating > 0:
                         MAL_score = mean_score_row[rec_anime].item()
-                        MAL_score_coeff = (-3 / 8) * MAL_score + 31 / 8
+                        MAL_score_coeff = -0.6 * MAL_score + 5.9
                         user_diff = user_scores[rec_anime] - user_mean_of_watched
                         MAL_diff = watched_MAL_score_dict[rec_anime][0] - MAL_mean_of_watched
                         rec_affinity += (user_diff - MAL_diff * MAL_score_coeff) * rec_rating
@@ -217,24 +251,26 @@ class AffinityDB:
                 except (ZeroDivisionError, ValueError) as e:  # No relevant recommended shows
                     database_dict['Recommended Shows Affinity'].append(0)
 
-                for tag in tags.all_tags_list:
-                    index = tags.get_tag_index(tag, show_tags_list)
+                for tag in tags.all_anilist_tags:
+                    index = tags.get_tag_index(tag, entry_tags_list)
                     if index != -1:
-                        adjusted_p = tags.adjust_tag_percentage(show_tags_list[index])
+                        adjusted_p = tags.adjust_tag_percentage(entry_tags_list[index]['percentage'])
                         database_dict[tag].append(adjusted_p)
                     else:
-                        if tag not in show_genres_list and tag != show_studio:
+                        if tag not in entry_genres_list and tag != entry_studio:
                             database_dict[tag].append(0)
                     database_dict[f"{tag} Affinity"].append(user_tag_affinity_dict[user_name][tag])
+                    database_dict[f"{tag} Positive Affinity"].append(
+                        user_tag_pos_affinity_dict[user_name][tag])
 
-                for genre in show_genres_list:
+                for genre in entry_genres_list:
                     database_dict[genre].append(1)
 
-                if show_studio in tags.all_tags_list:
-                    database_dict[show_studio].append(1)
+                if entry_studio in tags.all_anilist_tags:
+                    database_dict[entry_studio].append(1)
 
-                database_dict['User Score'].append(user_scores[show])
-                database_dict['Show Score'].append(mean_score_row[show].item())
+                database_dict['User Score'].append(user_scores[entry])
+                database_dict['Show Score'].append(mean_score_row[entry].item())
                 database_dict['Mean Score'].append(user_mean_of_watched)
                 database_dict['Standard Deviation'].append(user_std_of_watched)
 
@@ -248,12 +284,13 @@ class AffinityDB:
                     database_dict[key] = np.array(database_dict[key], dtype=np.float32)
 
                 pl.DataFrame(database_dict).write_parquet(
-                    f"{tags_db_filename}-P{(user_index + 1) // save_data_per}.parquet")
+                    f"{aff_db_filename}-P{(user_index + 1) // save_data_per}.parquet")
 
                 # After saving the data, we need to reinitialize the dicts to avoid wasting memory
-                for tag in tags.all_tags_list:
+                for tag in tags.all_anilist_tags:
                     database_dict[tag] = []
                     database_dict[f"{tag} Affinity"] = []
+                    database_dict[f"{tag} Positive Affinity"] = []
 
                 database_dict = database_dict | {"Recommended Shows Affinity": [],
                                                  "Show Score": [], "Mean Score": [], "Standard Deviation": [],
@@ -264,7 +301,7 @@ class AffinityDB:
         anime_db = AnimeDB()
         tags = Tags()
         graphs = Graphs()
-        relevant_shows = list(tags.shows_tags_dict.keys())
+        relevant_shows = list(tags.entry_tags_dict.keys())
         # The shows in our tags dict are the ones filtered when creating it
         # ( >= 15 min in length, >= 2 min per ep)
 
@@ -274,11 +311,11 @@ class AffinityDB:
         mean_score_row = partial_anime_df.filter(pl.col('Rows') == "Mean Score")
         user_amount = partial_main_df.shape[0]
 
-
         database_dict = {}
-        for tag in tags.all_tags_list:
+        for tag in tags.all_anilist_tags:
             database_dict[tag] = []
             database_dict[f"{tag} Affinity"] = []
+            database_dict[f"{tag} Positive Affinity"] = []
         database_dict = database_dict | {"Recommended Shows Affinity": [],
                                          "Show Score": [], "Mean Score": [], "Standard Deviation": [], "User Score": []}
 
@@ -286,8 +323,9 @@ class AffinityDB:
             if user_index % 100 == 0:
                 print(f"Currently on user {user_index}")
             user_tag_affinity_dict = {}
+            user_tag_pos_affinity_dict = {}
             calculate_affinities_of_user(user_index)
 
-        tags_db = tags.load_tags_database()
-        remove_zero_columns(tags_db)
-        tags_db.write_parquet(f"{tags_db_filename}.parquet")
+        affinity_db = self.load_affinity_DB()
+        remove_zero_columns(affinity_db)
+        affinity_db.write_parquet(f"{aff_db_filename}.parquet")

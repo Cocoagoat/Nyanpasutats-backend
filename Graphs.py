@@ -32,7 +32,7 @@ class Graphs:
                 print("Anime graphs dictionary loaded successfully")
             except FileNotFoundError:
                 print("Anime graphs dictionary not found. Creating new anime graphs dictionary")
-                self._all_graphs = self.create_graph_of_all_anime()
+                self.create_graph_of_all_anime()
         return self._all_graphs
 
     @property
@@ -226,7 +226,6 @@ class Graphs:
             for root_name in self.related_shows.keys():
                 if show_name in self.related_shows[root_name]:
                     return root_name, self.related_shows[root_name]
-
 
     def create_graph_of_all_anime(self):  # Main function
 

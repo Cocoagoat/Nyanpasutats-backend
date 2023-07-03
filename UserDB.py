@@ -59,7 +59,7 @@ class UserDB:
         if not isinstance(self._df, pl.DataFrame):
             try:
                 print("Loading main database")
-                self._df = pl.read_parquet(main_database_name)
+                self._df = pl.read_parquet(user_database_name)
             except FileNotFoundError:
                 print("Main database not found. Creating new main database")
                 amount = int(input("Insert the desired amount of users\n"))
@@ -190,7 +190,7 @@ class UserDB:
         """Used during the creation of the main database. Saves all relevant files
         (main database, user list, blacklist and scores dictionary) every N created
         entries as defined in fill_main_database."""
-        self._df.write_parquet(main_database_name)
+        self._df.write_parquet(user_database_name)
         usernames = list(self._df['Username'])
         print(f"Saving MAL user list. Length is {len(usernames)}")
         save_list_to_csv(usernames, MAL_users_filename)
@@ -453,7 +453,7 @@ class UserDB:
                 how="vertical",
             )
 
-            self.df.write_parquet(main_database_name)
+            self.df.write_parquet(user_database_name)
             self.MAL_users_list.append(user_name)
             save_list_to_csv(self.MAL_users_list, MAL_users_filename)
         return new_list_for_return

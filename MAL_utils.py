@@ -22,6 +22,7 @@ from operator import itemgetter
 from colorama import Fore
 from sortedcollections import OrderedSet
 import random
+from filenames import *
 
 
 class Seasons(Enum):
@@ -40,13 +41,7 @@ class MediaTypes(Enum):
     ona = 5
 
 
-main_database_name = "ScoresDBFinal4.parquet"
-anime_database_name = "AnimeDB4.parquet" # Exists for fast column name retrieval
-MAL_users_filename = "MALUsers4.csv"
-blacklist_users_filename = "Blacklist4.csv"
-scores_dict_filename = "ScoresDBDict4.pickle"
-tags_db_filename = "UserTagDBTest4"
-shows_tags_filename = "shows_tags_dict4.pickle"
+
 
 
 # class AllData:
@@ -1301,7 +1296,7 @@ class Data:
         if not isinstance(self._main_df, pl.DataFrame):
             try:
                 print("Loading main database")
-                self._main_df = pl.read_parquet(main_database_name)
+                self._main_df = pl.read_parquet(user_database_name)
             except FileNotFoundError:
                 print("Main database not found. Creating new main database")
                 amount = int(input("Insert the desired amount of users\n"))
@@ -1563,7 +1558,7 @@ class Data:
             for col_name in missing_cols:
                 self.main_df = self.main_df.with_columns(
                     pl.Series(col_name, [None] * len(self.main_df), dtype=pl.UInt8))
-            self.main_df.write_parquet(main_database_name)
+            self.main_df.write_parquet(user_database_name)
 
         # def synchronize_dfs(df1,df2,cols1=None,cols2=None):
         #     # Add all columns in db2 but not in db1 to db1
@@ -1712,7 +1707,7 @@ class Data:
         """Used during the creation of the main database. Saves all relevant files
         (main database, user list, blacklist and scores dictionary) every N created
         entries as defined in fill_main_database."""
-        self._main_df.write_parquet(main_database_name)
+        self._main_df.write_parquet(user_database_name)
         usernames = list(self._main_df['Username'])
         print(f"Saving MAL user list. Length is {len(usernames)}")
         save_list_to_csv(usernames,MAL_users_filename)
@@ -1978,7 +1973,7 @@ class Data:
                 how="vertical",
             )
 
-            self.main_df.write_parquet(main_database_name)
+            self.main_df.write_parquet(user_database_name)
             self.MAL_users_list.append(user_name)
             save_list_to_csv(self.MAL_users_list,MAL_users_filename)
         return new_list_for_return
