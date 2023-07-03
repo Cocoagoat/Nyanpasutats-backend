@@ -65,6 +65,7 @@ class AffinityDB:
 
             nonlocal user_tag_affinity_dict
             nonlocal database_dict
+            nonlocal user_tag_pos_affinity_dict
 
             save_data_per = 10000  # Each batch of N users will be separated into their own mini-database during
             # runtime to avoid blowing up my poor 32GB of RAM
@@ -296,6 +297,7 @@ class AffinityDB:
                                                  "Show Score": [], "Mean Score": [], "Standard Deviation": [],
                                                  "User Score": []}
                 user_tag_affinity_dict = {}
+                user_tag_pos_affinity_dict = {}
 
         user_db = UserDB()
         anime_db = AnimeDB()
@@ -312,18 +314,20 @@ class AffinityDB:
         user_amount = partial_main_df.shape[0]
 
         database_dict = {}
+
         for tag in tags.all_anilist_tags:
             database_dict[tag] = []
             database_dict[f"{tag} Affinity"] = []
             database_dict[f"{tag} Positive Affinity"] = []
         database_dict = database_dict | {"Recommended Shows Affinity": [],
                                          "Show Score": [], "Mean Score": [], "Standard Deviation": [], "User Score": []}
+        user_tag_affinity_dict = {}
+        user_tag_pos_affinity_dict = {}
 
         for user_index in range(user_amount):
             if user_index % 100 == 0:
                 print(f"Currently on user {user_index}")
-            user_tag_affinity_dict = {}
-            user_tag_pos_affinity_dict = {}
+
             calculate_affinities_of_user(user_index)
 
         affinity_db = self.load_affinity_DB()
