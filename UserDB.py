@@ -58,10 +58,10 @@ class UserDB:
         + mean score + scored shows + all the scores of each user in it."""
         if not isinstance(self._df, pl.DataFrame):
             try:
-                print("Loading main database")
+                print("Loading user database")
                 self._df = pl.read_parquet(user_database_name)
             except FileNotFoundError:
-                print("Main database not found. Creating new main database")
+                print("User database not found. Creating new user database")
                 amount = int(input("Insert the desired amount of users\n"))
                 self._df = pl.DataFrame(schema=self.schema_dict)
                 self.fill_main_database(amount)
@@ -74,6 +74,37 @@ class UserDB:
             self._df = value
         else:
             raise ValueError("df must be a Polars database")
+
+    @property
+    def filtered_df(self):
+        if not isinstance(self._partial_df, pl.DataFrame):
+            df_dict = self.df.to_dict(as_series=False)
+            titles = [title for title, show_stats in df_dict.items()
+                                       if title!='Rows' and
+                                       self.show_meets_conditions(show_stats)]
+            _partial_df = self.df.select(self.anime_db.partial_df.columns)
+        return _partial_df
+
+    def split_df(self,parts):
+        print("Beginning to split main database")
+        df_size = len(self.df)
+        part_size = int(df_size/parts)
+        for i in range(parts):
+            print(f"Currently on part {i}")
+            if i != parts-1:
+                df_part = self.df[i*part_size: (i+1)*part_size]
+            else:
+                df_part = self.df[i*part_size:df_size]  # In case df_size/parts was rounded down by the casting
+            df_part.write_parquet(f'Partials\\'
+                                  f'{user_database_name.split(".")[0]}-P{i+1}.parquet')
+
+    def get_df_part(self, i):
+        try:
+            print(f"Loading part {i} of user database")
+            return pl.read_parquet(f'Partials\\'
+                                   f'{user_database_name.split(".")[0]}-P{i}.parquet')
+        except FileNotFoundError:
+            print(f"Part {i} not found")
 
     @property
     def scores_dict(self):

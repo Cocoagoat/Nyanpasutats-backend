@@ -3,7 +3,7 @@ anime_database_name = "AnimeDB.parquet"
 MAL_users_filename = "MALUsers.csv"
 blacklist_users_filename = "Blacklist.csv"
 scores_dict_filename = "ScoresDBDict.pickle"
-aff_db_filename = "AffinityDB"
+aff_db_filename = "AffinityDB-X"
 # The lack of extension is on purpose ^
 entry_tags_filename = "entry_tags_dict.pickle"
 shows_tags_filename = "shows_tags_dict.pickle"

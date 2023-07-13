@@ -1,9 +1,13 @@
+import os
 from AnimeDB import AnimeDB
 from UserDB import UserDB
 from Tags import Tags
 from filenames import *
 from MAL_utils import *
 from Graphs import Graphs
+from concurrent.futures import ProcessPoolExecutor
+from memory_profiler import profile
+import shutil
 
 
 class AffinityDB:
@@ -19,9 +23,39 @@ class AffinityDB:
     def __init__(self):
         # All properties are loaded on demand
         self._df = None
-        self.anime_df = AnimeDB()
-        self.tags = Tags()
-        self.graphs = Graphs()
+        # self.anime_df = AnimeDB()
+        # self.tags = Tags()
+        # self.graphs = Graphs() #remove the selfs from other classes too?...
+
+    @staticmethod
+    def _load_affinity_DB(parts):
+        print(f"Unpacking part 1 of database")
+        tag_df = pl.read_parquet(f"Partials\\{aff_db_filename}-PP1.parquet")
+        for i in range(2, parts + 1):
+            try:
+                print(f"Unpacking part {i} of database")
+                temp_df = pl.read_parquet(f"Partials\\{aff_db_filename}-PP{i}.parquet")
+                tag_df = tag_df.vstack(temp_df)
+            except FileNotFoundError:
+                break
+        return tag_df
+
+    @timeit
+    def _create_affinity_DB(self):
+        parts = int(os.cpu_count()/2)
+        user_db = UserDB()
+        user_db.split_df(parts)
+        del user_db
+
+        with ProcessPoolExecutor(max_workers=parts) as executor:
+            # Each part is represented by a number from 0 to n_parts - 1
+            arguments = [(i, parts) for i in range(parts)]
+            _ = executor.map(self.create_partial_aff_DB, arguments)
+        full_df = self._load_affinity_DB(parts*10)
+        full_df.write_parquet(f"{aff_db_filename}.parquet")
+
+        shutil.rmtree("Partials")
+        os.makedirs("Partials")
 
     @property
     def df(self):
@@ -33,41 +67,50 @@ class AffinityDB:
                 self._df = pl.read_parquet(f"{aff_db_filename}.parquet")
             except FileNotFoundError:
                 print("Affinity database not found. Creating new affinity database")
-                self.create_affinity_DB()
+                self._create_affinity_DB()
                 self._df = pl.read_parquet(f"{aff_db_filename}.parquet")
         return self._df
 
     @staticmethod
-    def load_affinity_DB():
-        print(f"Unpacking part 1 of database")
-        tag_df = pl.read_parquet(f"{aff_db_filename}-P1.parquet")
-        for i in range(2, 1000):
-            try:
-                print(f"Unpacking part {i} of database")
-                temp_df = pl.read_parquet(f"{aff_db_filename}-P{i}.parquet")
-                tag_df = tag_df.vstack(temp_df)
-            except FileNotFoundError:
-                break
-        return tag_df
+    def create_partial_aff_DB(args):
 
-    def create_affinity_DB(self):
+        i, num_parts = args
+        print(f"Entered function, process {i}")
 
-        def calculate_affinities_of_user(user_index):
+        user_db = UserDB()
+        anime_db = AnimeDB()
+        tags = Tags()
+        graphs = Graphs()
+        relevant_shows = list(tags.entry_tags_dict.keys())
+        # The shows in our tags dict are the ones filtered when creating it
+        # ( >= 15 min in length, >= 2 min per ep)
 
-            # Entry refers to a single MAL entry. "Show" refers to a full show, consisting of several entries.
-            # For example, "Attack on Titan Season 2" is an entry. "Attack on Titan" can refer both to the entry
-            # (S1 of the show) or the show which consists of all entries related to "Attack on Titan".
-            # See Tags class for more info.
+        df_part_i = user_db.get_df_part(i+1)
 
-            # def calculate_length_coeff(entry, stats):
-            #     return min(1, stats[entry]["Episodes"] *
-            #                        stats[entry]["Duration"] / 200)
+        partial_main_df = df_part_i.select(user_db.stats + relevant_shows)
+        partial_anime_df = anime_db.df.select(["Rows"] + relevant_shows)
 
-            nonlocal user_tag_affinity_dict
-            nonlocal database_dict
-            nonlocal user_tag_pos_affinity_dict
+        mean_score_row = partial_anime_df.filter(pl.col('Rows') == "Mean Score")
+        user_amount = partial_main_df.shape[0]
 
-            save_data_per = 10000  # Each batch of N users will be separated into their own mini-database during
+        database_dict = {}
+
+        for tag in tags.all_anilist_tags:
+            database_dict[tag] = []
+            database_dict[f"{tag} Affinity"] = []
+            database_dict[f"{tag} Positive Affinity"] = []
+        database_dict = database_dict | {"Recommended Shows Affinity": [],
+                                         "Show Score": [], "Mean Score": [],
+                                         "Standard Deviation": [], "User Score": []}
+        user_tag_affinity_dict = {}
+        user_tag_pos_affinity_dict = {}
+        save_data_per = user_amount // 10
+        print(save_data_per)
+        for user_index in range(user_amount):
+            if user_index % 100 == 0:
+                print(f"Currently on user {user_amount*i + user_index}")
+
+            # Each batch of N users will be separated into their own mini-database during
             # runtime to avoid blowing up my poor 32GB of RAM
             show_count = 0
 
@@ -108,20 +151,25 @@ class AffinityDB:
             try:
                 x = int(np.ceil(user_mean_of_watched))
             except ValueError:
-                return
+                # This means the user has no watched shows, or there is another issue with the data.
+                print(f"Mean is {user_mean_of_watched}")
+                continue
 
-            score_diffs = [score - user_mean_of_watched for score in range(10,x-1,-1)]
-            exp_coeffs = [1 / 2 ** (10 - exp) * score_diffs[10 - exp] for exp in range(10,x-1,-1)]
-            # k = [score - user_mean_of_watched for score in range(10,x-1)]
-            # exp_coeff = [1/2**(exp-x)/k[11-x] for exp in range(x, 11)]
+            score_diffs = [score - user_mean_of_watched for score in range(10, x - 1, -1)]
+            exp_coeffs = [1 / 2 ** (10 - exp) * score_diffs[10 - exp] for exp in range(10, x - 1, -1)]
 
             # Now, we will loop over every show that the user has watched
             for entry, user_score in user_scores.items():
+
+                # Entry refers to a single MAL entry. "Show" refers to a full show, consisting of several entries.
+                # For example, "Attack on Titan Season 2" is an entry. "Attack on Titan" can refer both to the entry
+                # (S1 of the show) or the show which consists of all entries related to "Attack on Titan".
+                # See Tags class for more info.
                 if not user_score or entry in processed_entries:
                     continue
 
-                main_show = self.tags.entry_tags_dict[entry]['Main']
-                main_show_data = self.tags.show_tags_dict[main_show]
+                main_show = tags.entry_tags_dict[entry]['Main']
+                main_show_data = tags.show_tags_dict[main_show]
                 user_watched_entries_length_coeffs = [x[1] for x in
                                                       main_show_data['Related'].items()
                                                       if user_scores[x[0]]]
@@ -135,7 +183,7 @@ class AffinityDB:
                     if not user_score:
                         continue
 
-                    length_coeff = length_coeff/sum_of_length_coeffs
+                    length_coeff = length_coeff / sum_of_length_coeffs
 
                     MAL_score = mean_score_row[related_entry].item()
                     if MAL_score < 6.5:
@@ -145,7 +193,6 @@ class AffinityDB:
                     user_entry_list.append(related_entry)
 
                     show_count += length_coeff
-                    # MAL_score_coeff = (-3 / 8) * MAL_score + 31 / 8
                     MAL_score_coeff = -0.6 * MAL_score + 5.9
 
                     for tag in tags.entry_tags_dict[related_entry]['Tags']:
@@ -166,7 +213,7 @@ class AffinityDB:
                         tag_entry_list[tag['name']].append(related_entry)
 
                         if user_score >= user_mean_of_watched:
-                            positive_aff_per_tag[tag['name']] += MAL_score_coeff * exp_coeffs[10-user_score]\
+                            positive_aff_per_tag[tag['name']] += MAL_score_coeff * exp_coeffs[10 - user_score] \
                                                                  * adjusted_p * length_coeff
                             pos_tag_entry_list[tag['name']].append(related_entry)
 
@@ -178,7 +225,7 @@ class AffinityDB:
                         tag_entry_list[genre].append(related_entry)
 
                         if user_score >= user_mean_of_watched:
-                            positive_aff_per_tag[genre] += MAL_score_coeff * exp_coeffs[10-user_score]\
+                            positive_aff_per_tag[genre] += MAL_score_coeff * exp_coeffs[10 - user_score] \
                                                            * length_coeff
                             pos_tag_entry_list[genre].append(related_entry)
 
@@ -190,7 +237,7 @@ class AffinityDB:
                         tag_entry_list[show_studio].append(related_entry)
 
                         if user_score >= user_mean_of_watched:
-                            positive_aff_per_tag[show_studio] += MAL_score_coeff * exp_coeffs[10-user_score]\
+                            positive_aff_per_tag[show_studio] += MAL_score_coeff * exp_coeffs[10 - user_score] \
                                                                  * length_coeff
                             pos_tag_entry_list[show_studio].append(related_entry)
 
@@ -198,6 +245,7 @@ class AffinityDB:
 
             # After calculating the total scores for each tag, we calculate the "affinity" of the user
             # to each tag.
+
             for tag in tags.all_anilist_tags:
                 try:
                     tag_overall_ratio = user_tag_counts[tag] / show_count
@@ -207,14 +255,13 @@ class AffinityDB:
                     user_tag_diff = user_score_per_tag[tag] / user_tag_counts[tag] - user_mean_of_watched
                     MAL_tag_diff = MAL_score_per_tag[tag] / user_tag_counts[tag] - MAL_mean_of_watched
                     user_tag_affinity_dict[user_name][tag] = (2 * user_tag_diff - MAL_tag_diff) * freq_coeff
-                    user_tag_pos_affinity_dict[user_name][tag] = (positive_aff_per_tag[tag]/user_tag_counts[tag])\
-                                                                 *freq_coeff
+                    user_tag_pos_affinity_dict[user_name][tag] = (positive_aff_per_tag[tag] / user_tag_counts[tag]) \
+                                                                 * freq_coeff
 
                 except ZeroDivisionError:
                     user_tag_affinity_dict[user_name][tag] = 0
 
             user_tag_affinity_dict[user_name]['Shows'] = user_entry_list
-
 
             # Whatever is above - func2 (create_user_tag_affinity_dict? also draw it in the comments)
             # Now we choose 20 random shows from the user's list. Each show will give us an entry in the final
@@ -232,7 +279,8 @@ class AffinityDB:
                 # while taking the weighted average of the user's affinities to the recommended shows.
                 # The weight of each show is it's rating/total rating of all recommended shows.
 
-                total_rec_rating = sum([rating for title, rating in tags.entry_tags_dict[entry]['Recommended'].items()])
+                total_rec_rating = sum(
+                    [rating for title, rating in tags.entry_tags_dict[entry]['Recommended'].items()])
                 recommended_shows = tags.entry_tags_dict[entry]['Recommended']
                 rec_affinity = 0
 
@@ -276,16 +324,16 @@ class AffinityDB:
                 database_dict['Standard Deviation'].append(user_std_of_watched)
 
             if (user_index + 1) % save_data_per == 0:
-                print(f"Finished processing user {user_index + 1}")
-                save_pickled_file(f"user_tag_affinity_dict-P{(user_index + 1) // save_data_per}.pickle",
-                                  user_tag_affinity_dict)
+                subpart_num = (user_index + 1) // save_data_per
+                print(f"Finished processing user {10*i + user_index + 1}, saving PP-{10*i + subpart_num}")
+                # save_pickled_file(f"user_tag_affinity_dict-PP{subpart_num}.pickle", user_tag_affinity_dict)
                 # Fix the above (either remove this entirely or concatenate them at the end?)
 
                 for key in database_dict.keys():
                     database_dict[key] = np.array(database_dict[key], dtype=np.float32)
 
                 pl.DataFrame(database_dict).write_parquet(
-                    f"{aff_db_filename}-P{(user_index + 1) // save_data_per}.parquet")
+                    f"Partials\\{aff_db_filename}-PP{10*i + subpart_num}.parquet")
 
                 # After saving the data, we need to reinitialize the dicts to avoid wasting memory
                 for tag in tags.all_anilist_tags:
@@ -298,38 +346,3 @@ class AffinityDB:
                                                  "User Score": []}
                 user_tag_affinity_dict = {}
                 user_tag_pos_affinity_dict = {}
-
-        user_db = UserDB()
-        anime_db = AnimeDB()
-        tags = Tags()
-        graphs = Graphs()
-        relevant_shows = list(tags.entry_tags_dict.keys())
-        # The shows in our tags dict are the ones filtered when creating it
-        # ( >= 15 min in length, >= 2 min per ep)
-
-        partial_main_df = user_db.df.select(user_db.stats + relevant_shows)
-        partial_anime_df = anime_db.df.select(["Rows"] + relevant_shows)
-
-        mean_score_row = partial_anime_df.filter(pl.col('Rows') == "Mean Score")
-        user_amount = partial_main_df.shape[0]
-
-        database_dict = {}
-
-        for tag in tags.all_anilist_tags:
-            database_dict[tag] = []
-            database_dict[f"{tag} Affinity"] = []
-            database_dict[f"{tag} Positive Affinity"] = []
-        database_dict = database_dict | {"Recommended Shows Affinity": [],
-                                         "Show Score": [], "Mean Score": [], "Standard Deviation": [], "User Score": []}
-        user_tag_affinity_dict = {}
-        user_tag_pos_affinity_dict = {}
-
-        for user_index in range(user_amount):
-            if user_index % 100 == 0:
-                print(f"Currently on user {user_index}")
-
-            calculate_affinities_of_user(user_index)
-
-        affinity_db = self.load_affinity_DB()
-        remove_zero_columns(affinity_db)
-        affinity_db.write_parquet(f"{aff_db_filename}.parquet")
