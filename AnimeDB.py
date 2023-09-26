@@ -36,13 +36,15 @@ class AnimeDB:
         to house and create on demand all the data structures that are used in this project."""
         if cls._instance is None:
             cls._instance = super().__new__(cls, *args, **kwargs)
+            cls._instance._df = None
+            cls._instance._titles = None
+            cls._instance._partial_df = None
         return cls._instance
 
     def __init__(self):
         # All properties are loaded on demand
-        self._df = None
-        self._titles = None
-        self._partial_df = None
+        pass
+
 
     stats = {'ID': 0, 'Mean Score': 1, 'Scores': 2, 'Members': 3, 'Episodes': 4,
              'Duration': 5, 'Type': 6, 'Year': 7, 'Season': 8}
@@ -210,7 +212,7 @@ class AnimeDB:
                 print(anime_batch)
 
             for anime in anime_batch["data"]:
-                if not non_sequels_only or anime_is_valid(anime):
+                if not non_sequels_only:
                     title = create_anime_DB_entry(anime, url_required_fields)
                 if title.startswith(last_show):
                     last_show_reached = True

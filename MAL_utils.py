@@ -20,7 +20,7 @@ except ImportError:
     import _thread as thread
 from operator import itemgetter
 from colorama import Fore
-from sortedcollections import OrderedSet
+# from sortedcollections import OrderedSet
 import random
 from filenames import *
 
@@ -1627,8 +1627,7 @@ class Data:
                 print(anime_batch)
 
             for anime in anime_batch["data"]:
-                if not non_sequels_only or anime_is_valid(anime):
-                    title = create_anime_DB_entry(anime, url_required_fields)
+                title = create_anime_DB_entry(anime, url_required_fields)
                 if title.startswith(last_show):
                     last_show_reached = True
                     break
@@ -2040,130 +2039,130 @@ def get_usernames_from_show(base_url):
     return users_table
 
 
-def allowed_type_but_invalid_show(anime, relation_type):
-    """Helper function for filtering out shows that already have a related entry
-       in the database (only for used for non-sequels-only database).
+# def allowed_type_but_invalid_show(anime, relation_type):
+#     """Helper function for filtering out shows that already have a related entry
+#        in the database (only for used for non-sequels-only database).
+#
+#         Parameters :
+#
+#             anime - the JSON object representing a single show. See MAL API
+#             documentation for more info.
+#
+#             relation_type -
+#
+#         """
+#     match relation_type:
+#         case "parent_story" | "alternative_version":
+#             # This case mainly filters one-off OVAs of shows that eventually got a full
+#             # adaptation (but the OVA's ID will obviously be lower). Note that if the
+#             # alternative version of a show is a TV show,
+#             # it is most likely a remake - and thus should count as a valid show (for
+#             # example Fruits Basket 2001 vs 2019).
+#             if anime["media_type"] != 'tv':
+#                 return True
+#         case "other":
+#             relation_types = [related_anime["relation_type"] for related_anime in
+#                               anime["related_anime"]]  #
+#             if anime["media_type"] == 'special' or \
+#                     (anime["media_type"] not in 'tvona' and 'prequelsequel' in relation_types):  #
+#                 return True
+#             # If the anime is a "special" or is something that isn't a TV/ONA
+#             # (basically a regular series), but does have a prequel/sequel - it
+#             # gets filtered.
+#     return False
 
-        Parameters :
 
-            anime - the JSON object representing a single show. See MAL API
-            documentation for more info.
-
-            relation_type -
-
-        """
-    match relation_type:
-        case "parent_story" | "alternative_version":
-            # This case mainly filters one-off OVAs of shows that eventually got a full
-            # adaptation (but the OVA's ID will obviously be lower). Note that if the
-            # alternative version of a show is a TV show,
-            # it is most likely a remake - and thus should count as a valid show (for
-            # example Fruits Basket 2001 vs 2019).
-            if anime["media_type"] != 'tv':
-                return True
-        case "other":
-            relation_types = [related_anime["relation_type"] for related_anime in
-                              anime["related_anime"]]  #
-            if anime["media_type"] == 'special' or \
-                    (anime["media_type"] not in 'tvona' and 'prequelsequel' in relation_types):  #
-                return True
-            # If the anime is a "special" or is something that isn't a TV/ONA
-            # (basically a regular series), but does have a prequel/sequel - it
-            # gets filtered.
-    return False
-
-
-def anime_is_valid(anime) -> bool:  # TURN THIS INTO A DATABASE
-    """This function is used for filtering out shows that already have a related entry
-        in the database (only used for non-sequels-only database). For example, season 2
-        of any show will be considered invalid, as will any special episodes that have a
-        separate entry on MAL.
-
-        Parameters :
-            anime_id : the MAL ID of the anime to be checked
-
-        Returns :
-            True/False
-
-    """
-
-    def add_entry(title, valid):
-        with open("ValidTitles.csv", "w", encoding='utf-8', newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow([title, valid])
-
-    try:
-        valid_titles = pd.read_csv("ValidTitles.csv")
-        try:
-            anime_row = valid_titles.loc[valid_titles['Title'] == anime['title']]
-            return anime_row['Valid'].bool()
-        except KeyError:
-            pass  # If the entry for the anime isn't in the database, it's probably
-            # a new show that hasn't been put in yet. The function will proceed
-            # to add it to the database and return the appropriate T/F value.
-    except FileNotFoundError:
-        pass  # If file not found, function proceeds to create it from scratch.
-        # There should never be a need to do this
-
-    url = f'https://api.myanimelist.net/v2/anime/{anime["mal_id"]}?fields=id,media_type,mean,' \
-          f'related_anime,genres,' \
-          f'average_episode_duration,num_episodes,num_scoring_users'  #
-    # This url will return more detailed information about the anime we're checking
-    # than we have in the anime object passed to the function
-
-    anime = call_function_through_process(get_search_results, url)
-    # If we got an error, keep sleeping and trying until it works (or until
-    # get_search_results terminates automatically in case of critical error)
-    while anime is None:
-        logger.warning("Anime was returned as None, sleeping and retrying")
-        time.sleep(Sleep.LONG_SLEEP)  # Just in case
-        print("Anime was returned as None, sleeping and retrying")
-        anime = call_function_through_process(get_search_results, url)
-    # except (urllib.error.HTTPError, requests.HTTPError,
-    # http.client.RemoteDisconnected):
-    #     print("---------- Connection was reset, waiting 60 seconds ----------")
-    #     time.sleep(60)
-    #     return anime_is_valid(anime_id)
-    print(Fore.LIGHTBLUE_EX + anime["title"])
-
-    allowed_types = ["alternative_setting", "parent_story", "other", "character",
-                     "alternative_version"]  #
-    anime_duration_seconds = anime["num_episodes"] * anime["average_episode_duration"]
-
-    if (anime_duration_seconds < 1800 and anime["media_type"] != 'movie') \
-            or anime_duration_seconds < 600:
-        print(Fore.RED + f'INVALID - Anime duration is only {anime_duration_seconds}')
-        add_entry(anime["title"], False)
-        return False  # This disqualifies any OVAs (or really short movies).
-    if anime["num_scoring_users"] < 2000:  #
-        print(Fore.RED + f'INVALID - Only {anime["num_scoring_users"]} scored the anime')
-        add_entry(anime["title"], False)
-        return False  # This disqualifies shows with too little data to be meaningful
-    for related_anime in anime["related_anime"]:
-
-        # For every show the anime that's being tested has a relationship with,
-        # first of all we check whether the ID of the related anime is smaller (meaning
-        # something related to the tested anime already existed before it).
-        # If it is, we then check whether despite that, the anime being tested is a
-        # standalone. This could happen with several relationship types as described in
-        # "allowed_types".
-        # Afterwards, we do a third check through filter_allowed_types,
-        # which does a separate case check for each relation type on whether the show
-        # truly is a standalone.
-
-        relation_type = related_anime["relation_type"]
-        if (related_anime["node"]["id"] < anime["id"] and (
-                relation_type not in allowed_types or  #
-                allowed_type_but_invalid_show(anime, relation_type))):  #
-            print(Fore.RED + 'INVALID - Related anime already found in list')
-            add_entry(anime["title"], False)
-            return False
-
-    print(Fore.LIGHTGREEN_EX + f'VALID - Duration of the show above is '
-                               f'{anime["num""_episodes"] * anime["average_episode_duration"]}'
-                               f' and {anime["num_scoring_users"]} gave it a score.')  #
-    add_entry(anime["title"], True)
-    return True
+# def anime_is_valid(anime) -> bool:  # TURN THIS INTO A DATABASE
+#     """This function is used for filtering out shows that already have a related entry
+#         in the database (only used for non-sequels-only database). For example, season 2
+#         of any show will be considered invalid, as will any special episodes that have a
+#         separate entry on MAL.
+#
+#         Parameters :
+#             anime_id : the MAL ID of the anime to be checked
+#
+#         Returns :
+#             True/False
+#
+#     """
+#
+#     def add_entry(title, valid):
+#         with open("ValidTitles.csv", "w", encoding='utf-8', newline="") as f:
+#             writer = csv.writer(f)
+#             writer.writerow([title, valid])
+#
+#     try:
+#         valid_titles = pd.read_csv("ValidTitles.csv")
+#         try:
+#             anime_row = valid_titles.loc[valid_titles['Title'] == anime['title']]
+#             return anime_row['Valid'].bool()
+#         except KeyError:
+#             pass  # If the entry for the anime isn't in the database, it's probably
+#             # a new show that hasn't been put in yet. The function will proceed
+#             # to add it to the database and return the appropriate T/F value.
+#     except FileNotFoundError:
+#         pass  # If file not found, function proceeds to create it from scratch.
+#         # There should never be a need to do this
+#
+#     url = f'https://api.myanimelist.net/v2/anime/{anime["mal_id"]}?fields=id,media_type,mean,' \
+#           f'related_anime,genres,' \
+#           f'average_episode_duration,num_episodes,num_scoring_users'  #
+#     # This url will return more detailed information about the anime we're checking
+#     # than we have in the anime object passed to the function
+#
+#     anime = call_function_through_process(get_search_results, url)
+#     # If we got an error, keep sleeping and trying until it works (or until
+#     # get_search_results terminates automatically in case of critical error)
+#     while anime is None:
+#         logger.warning("Anime was returned as None, sleeping and retrying")
+#         time.sleep(Sleep.LONG_SLEEP)  # Just in case
+#         print("Anime was returned as None, sleeping and retrying")
+#         anime = call_function_through_process(get_search_results, url)
+#     # except (urllib.error.HTTPError, requests.HTTPError,
+#     # http.client.RemoteDisconnected):
+#     #     print("---------- Connection was reset, waiting 60 seconds ----------")
+#     #     time.sleep(60)
+#     #     return anime_is_valid(anime_id)
+#     print(Fore.LIGHTBLUE_EX + anime["title"])
+#
+#     allowed_types = ["alternative_setting", "parent_story", "other", "character",
+#                      "alternative_version"]  #
+#     anime_duration_seconds = anime["num_episodes"] * anime["average_episode_duration"]
+#
+#     if (anime_duration_seconds < 1800 and anime["media_type"] != 'movie') \
+#             or anime_duration_seconds < 600:
+#         print(Fore.RED + f'INVALID - Anime duration is only {anime_duration_seconds}')
+#         add_entry(anime["title"], False)
+#         return False  # This disqualifies any OVAs (or really short movies).
+#     if anime["num_scoring_users"] < 2000:  #
+#         print(Fore.RED + f'INVALID - Only {anime["num_scoring_users"]} scored the anime')
+#         add_entry(anime["title"], False)
+#         return False  # This disqualifies shows with too little data to be meaningful
+#     for related_anime in anime["related_anime"]:
+#
+#         # For every show the anime that's being tested has a relationship with,
+#         # first of all we check whether the ID of the related anime is smaller (meaning
+#         # something related to the tested anime already existed before it).
+#         # If it is, we then check whether despite that, the anime being tested is a
+#         # standalone. This could happen with several relationship types as described in
+#         # "allowed_types".
+#         # Afterwards, we do a third check through filter_allowed_types,
+#         # which does a separate case check for each relation type on whether the show
+#         # truly is a standalone.
+#
+#         relation_type = related_anime["relation_type"]
+#         if (related_anime["node"]["id"] < anime["id"] and (
+#                 relation_type not in allowed_types or  #
+#                 allowed_type_but_invalid_show(anime, relation_type))):  #
+#             print(Fore.RED + 'INVALID - Related anime already found in list')
+#             add_entry(anime["title"], False)
+#             return False
+#
+#     print(Fore.LIGHTGREEN_EX + f'VALID - Duration of the show above is '
+#                                f'{anime["num""_episodes"] * anime["average_episode_duration"]}'
+#                                f' and {anime["num_scoring_users"]} gave it a score.')  #
+#     add_entry(anime["title"], True)
+#     return True
 
 
 def check_account_age_directly(user_name):
@@ -2220,7 +2219,6 @@ def get_anime_batch_from_MAL(page_num, required_fields):
     return anime_batch
 
 
-
 def count_scored_shows(user_list):
     count = 0
     for anime in user_list:
@@ -2237,7 +2235,8 @@ def get_user_MAL_list(user_name, full_list=True):
     url = f'https://api.myanimelist.net/v2/users/' \
           f'{user_name}/animelist?fields=list_status&limit=1000&sort=list_score&nsfw=True'
 
-    response = call_function_through_process(get_search_results, url)
+    # response = call_function_through_process(get_search_results, url)
+    response = get_search_results(url)
     try:
         anime_list = response["data"]
     except (TypeError, KeyError) as ex:
@@ -2270,4 +2269,7 @@ def get_user_MAL_list(user_name, full_list=True):
             scored_shows = count_scored_shows(anime_list)
 
     return anime_list
+
+
+
 

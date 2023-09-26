@@ -38,17 +38,20 @@ class UserDB:
         to house and create on demand all the data structures that are used in this project."""
         if cls._instance is None:
             cls._instance = super().__new__(cls, *args, **kwargs)
+            cls._instance._df = None
+            cls._instance._MAL_user_list = None
+            cls._instance._blacklist = None
+            cls._instance._scores_dict = None
+            cls._instance._columns = None
+            cls._instance._schema_dict = None
+            cls._instance._filtered_df = None
+            cls._instance.anime_db = AnimeDB()
         return cls._instance
 
     def __init__(self):
+        pass
         # All properties are loaded on demand
-        self._df = None
-        self._MAL_user_list = None
-        self._blacklist = None
-        self._scores_dict = None
-        self._columns = None
-        self._schema_dict = None
-        self.anime_db = AnimeDB()
+
 
     stats = ["Index", "Username", "Mean Score", "Scored Shows"]
 
@@ -75,15 +78,15 @@ class UserDB:
         else:
             raise ValueError("df must be a Polars database")
 
-    @property
-    def filtered_df(self):
-        if not isinstance(self._partial_df, pl.DataFrame):
-            df_dict = self.df.to_dict(as_series=False)
-            titles = [title for title, show_stats in df_dict.items()
-                                       if title!='Rows' and
-                                       self.show_meets_conditions(show_stats)]
-            _partial_df = self.df.select(self.anime_db.partial_df.columns)
-        return _partial_df
+    # @property
+    # def filtered_df(self):
+    #     if not isinstance(self._filtered_df, pl.DataFrame):
+    #         df_dict = self.df.to_dict(as_series=False)
+    #         titles = [title for title, show_stats in df_dict.items()
+    #                                    if title!='Rows' and
+    #                                    self.show_meets_conditions(show_stats)]
+    #         _filtered_df = self.df.select(titles)
+    #     return _filtered_df
 
     def split_df(self,parts):
         print("Beginning to split main database")
@@ -104,7 +107,11 @@ class UserDB:
             return pl.read_parquet(f'Partials\\'
                                    f'{user_database_name.split(".")[0]}-P{i}.parquet')
         except FileNotFoundError:
-            print(f"Part {i} not found")
+            print(f"Part {i} not found, splitting db into default 10 parts")
+            self.split_df(10)
+            return pl.read_parquet(f'Partials\\'
+                                   f'{user_database_name.split(".")[0]}-P{i}.parquet')
+
 
     @property
     def scores_dict(self):
@@ -488,3 +495,45 @@ class UserDB:
             self.MAL_users_list.append(user_name)
             save_list_to_csv(self.MAL_users_list, MAL_users_filename)
         return new_list_for_return
+
+    def get_user_db_entry(self,user_name):
+        """Creates a user entry for the one we're calculating affinity for + returns a Polars row of their stats.
+        Currently not in use due to being time-inefficient at adding in real-time. New process maybe?"""
+        user_db = UserDB()
+        user_list = get_user_MAL_list(user_name, full_list=False)
+        if not user_list:
+            print("Unable to access private user list. Please make your list public and try again.")
+            return
+
+        old_titles = [x for x in self.columns if x not in self.stats]
+
+        anime_indexes = {v: k for (k, v) in enumerate(old_titles)}
+        # new_list = [None] * len(self.titles)
+        new_list = [None] * (len(old_titles))
+
+        show_amount = 0
+        score_sum = 0
+        for anime in user_list:  # anime_list, scores_db
+            title = anime['node']['title']
+            score = anime['list_status']['score']
+            if score == 0:
+                break
+            show_amount += 1
+            if title in user_db.columns:
+                new_list[anime_indexes[title]] = score
+            score_sum += score
+
+        mean_score = round(score_sum / show_amount, 4)
+        new_list_for_return = list_to_uint8_array(new_list)
+        # We save the original list here,
+        # because later we'll have to add fields that are relevant for adding to DB but not for list comparison.
+
+        index = 0
+        new_list = [index, user_name, mean_score, show_amount] + new_list
+        schema_dict = {'Index': pl.Int64, 'Username': pl.Utf8, 'Mean Score': pl.Float32, 'Scored Shows': pl.UInt32} | \
+                      {x: y for (x, y) in zip(old_titles, [pl.UInt8] * len(old_titles))}
+
+        new_dict = {k: v for k, v in zip(self.columns, new_list)}
+
+        new_row = pl.DataFrame(new_dict, schema=schema_dict)
+        return new_row

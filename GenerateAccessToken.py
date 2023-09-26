@@ -6,7 +6,7 @@ import sys
 try:
     with open('Client_details.txt') as f:
         id_secret = f.readlines()
-    CLIENT_ID = id_secret[0]
+    CLIENT_ID = id_secret[0][:-1]
     CLIENT_SECRET = id_secret[1]
 except IndexError:
     print("ERROR - Client_details.txt is not in the correct format")

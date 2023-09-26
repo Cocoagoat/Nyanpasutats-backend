@@ -130,41 +130,38 @@ class Graphs:
         relevant_stats = ["Duration", "Episodes", "Type"]
         show_stats = self.anime_db.get_stats_of_shows([show1, show2], relevant_stats)
         # Put these into the 3rd case^
-        match relation_type:
+        if relation_type in ['sequel', 'prequel', 'alternative_version', 'summary']:
+            # Sequels, prequels, alternative versions and summaries are never separate shows
+            return False
 
-            case 'sequel' | 'prequel' | 'alternative_version' | 'summary':
-                # Sequels, prequels, alternative versions and summaries are never separate shows
-                return False
+        if relation_type == 'character':
+            # "character" means that the only common thing between the two shows is that some of
+            # the characters are mutual. It will always be a separate show, or something very short
+            # that isn't in the partial database in the first place.
+            return True
 
-            case 'character':
-                # "character" means that the only common thing between the two shows is that some of
-                # the characters are mutual. It will always be a separate show, or something very short
-                # that isn't in the partial database in the first place.
-                return True
+        if relation_type in  ['other' | 'side_story' | 'spin_off']:  # add parent?
+            # This is the most problematic case. MAL is very inconsistent with how it labels things
+            # as "other", "side story" or "spin-off". The latter two are used almost interchangeably,
+            # and "other" can be used for pretty much ANYTHING. Side stories/spin-offs, commercials,
+            # even crossovers. There is no feasible way to catch literally every case, but this gets
+            # the vast majority of them.
+            if both_shows_are_TV() or both_shows_are_movies() or \
+                    (show_is_longer_than(144, show1) and show_is_longer_than(144, show2)):
+                return True  # Add a search for what sequels are?
+            return False
 
-            case 'other' | 'side_story' | 'spin_off':  # add parent?
-                # This is the most problematic case. MAL is very inconsistent with how it labels things
-                # as "other", "side story" or "spin-off". The latter two are used almost interchangeably,
-                # and "other" can be used for pretty much ANYTHING. Side stories/spin-offs, commercials,
-                # even crossovers. There is no feasible way to catch literally every case, but this gets
-                # the vast majority of them.
-                if both_shows_are_TV() or both_shows_are_movies() or \
-                        (show_is_longer_than(144, show1) and show_is_longer_than(144, show2)):
-                    return True  # Add a search for what sequels are?
-                return False
-
-            case 'alternative_setting':
+        if relation_type == 'alternative_setting':
                 # Alternative setting almost always means that the shows are set in the same universe,
                 # but have different stories or even characters. Sometimes it can also be used for
                 # miscellanous related shorts, which is why I made a small (arbitrary) length requirement
                 # for the shows to be counted as separate.
 
-                if (show_is_longer_than(60, show1) and show_is_longer_than(60, show2)):
-                    return True
-                return False
+            if (show_is_longer_than(60, show1) and show_is_longer_than(60, show2)):
+                return True
+            return False
 
-            case _:
-                return False
+        return False
 
     def split_graph(self, G):
         """This function splits a graph of a group of anime related to each other in some way on MAL.

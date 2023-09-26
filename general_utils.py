@@ -6,6 +6,7 @@ import numpy as np
 import requests
 import time
 import pickle
+import pandas as pd
 from enum import Enum
 from polars.exceptions import SchemaFieldNotFoundError
 try:
@@ -277,44 +278,43 @@ def analyze_unauthorized_cause(unauthorized_cause, url, q=None):
                  a separate process. It is necessary in this function in case
                  we want to sleep (and thus also need to tell the main process
                  to sleep, since this will run inside the child process)."""
-    match unauthorized_cause:
-        case ErrorCauses.RESOURCE_LOCKED:
-            # Problem is resource-specific (e.g user list is locked),
-            # moving on to next resource since this one cannot be retrieved.
-            return None
-        case ErrorCauses.HEADERS_EXPIRED | ErrorCauses.TOO_MANY_REQUESTS:
-            # Cause was determined to be expired headers/shadow rate limit,
-            # retrying the same request again.
-            response = get_search_results(url)
-            return response
-        # ----------------------------------------------------------------------------------#
-        # 99.99% of the time, the above two cases are the only reasons we could get an
-        # authorization error. This case is handled for the sake of absolute safety
-        # since the program runs for multiple days at a time.
-        case ErrorCauses.UNKNOWN_ERROR:
-            time.sleep(Sleep.MEDIUM_SLEEP)
-            unauthorized_cause = determine_unauthorized_cause(q)
+    if unauthorized_cause == ErrorCauses.RESOURCE_LOCKED:
+        # Problem is resource-specific (e.g user list is locked),
+        # moving on to next resource since this one cannot be retrieved.
+        return None
+    if unauthorized_cause == ErrorCauses.HEADERS_EXPIRED or ErrorCauses.TOO_MANY_REQUESTS:
+        # Cause was determined to be expired headers/shadow rate limit,
+        # retrying the same request again.
+        response = get_search_results(url)
+        return response
+    # ----------------------------------------------------------------------------------#
+    # 99.99% of the time, the above two cases are the only reasons we could get an
+    # authorization error. The below case is handled for the sake of absolute safety
+    # since the program runs for multiple days at a time.
+    if unauthorized_cause == ErrorCauses.UNKNOWN_ERROR:
+        time.sleep(Sleep.MEDIUM_SLEEP)
+        unauthorized_cause = determine_unauthorized_cause(q)
 
-            # Trying to determine unauthorized cause one more time. If it still returns
-            # an unknown error, we move on to the next resource.
-            if unauthorized_cause == ErrorCauses.UNKNOWN_ERROR:
-                get_search_results.consequent_unknown_errors += 1
-            else:
-                return analyze_unauthorized_cause(unauthorized_cause, url, q)
+        # Trying to determine unauthorized cause one more time. If it still returns
+        # an unknown error, we move on to the next resource.
+        if unauthorized_cause == ErrorCauses.UNKNOWN_ERROR:
+            get_search_results.consequent_unknown_errors += 1
+        else:
+            return analyze_unauthorized_cause(unauthorized_cause, url, q)
 
             # If 10 resources in a row failed on authorization AND the dummy request
             # returned an unknown error after each time, we'll sleep for a long time
             # and see if that fixes the problem. If not, we terminate.
-            if get_search_results.consequent_unknown_errors == 10:
-                add_to_queue(q, Sleep(Sleep.LONG_SLEEP))  # Telling main process to sleep
-                # as well
-                time.sleep(Sleep.LONG_SLEEP * 6)
-                unauthorized_cause = determine_unauthorized_cause(q)
-                if unauthorized_cause == ErrorCauses.UNKNOWN_ERROR:
-                    logger.error('An unknown server exception has occurred'
-                                 ' over 10 times in a row, terminating program.')  #
-                    raise UnknownServerException
-            return None
+        if get_search_results.consequent_unknown_errors == 10:
+            add_to_queue(q, Sleep(Sleep.LONG_SLEEP))  # Telling main process to sleep
+            # as well
+            time.sleep(Sleep.LONG_SLEEP * 6)
+            unauthorized_cause = determine_unauthorized_cause(q)
+            if unauthorized_cause == ErrorCauses.UNKNOWN_ERROR:
+                logger.error('An unknown server exception has occurred'
+                             ' over 10 times in a row, terminating program.')  #
+                raise UnknownServerException
+        return None
     print("No case matched, returning None")
     return None
 
@@ -337,6 +337,28 @@ def count_calls(func):
         return func(*args, **kwargs)
     wrapped.calls = 0
     return wrapped
+
+
+def split_list_interval(input_list, n_parts):
+    return [input_list[i::n_parts] for i in range(n_parts)]
+
+
+# def get_search_results2(url):
+#
+#     for _ in range(10):
+#         try:
+#             response = requests.get(url, headers=headers, timeout=15)
+#             print(response.status_code)
+#             print(response.json())
+#         except (SSLError, ConnectionError, http.client.RemoteDisconnected, ProtocolError, ConnectionResetError) as e:
+#             # Sometimes MAL throws a weird SSL error, retrying fixes it
+#             time.sleep(Sleep.SHORT_SLEEP)
+#             print("Error, retrying connection")
+#             logger.debug("Error, retrying connection")
+#             continue
+#
+#         except
+#         break
 
 
 def get_search_results(url, q=None):
@@ -368,8 +390,8 @@ def get_search_results(url, q=None):
     for _ in range(10):
         try:
             response = requests.get(url, headers=headers, timeout=15)
-            print(response.status_code)
-            print(response.json())
+            # print(response.status_code)
+            # print(response.json())
         except (SSLError, ConnectionError, http.client.RemoteDisconnected, ProtocolError, ConnectionResetError) as e:
             # Sometimes MAL throws a weird SSL error, retrying fixes it
             time.sleep(Sleep.SHORT_SLEEP)
@@ -378,57 +400,63 @@ def get_search_results(url, q=None):
             continue
         break
 
+    codes_to_check = [HTTPStatus.OK, HTTPStatus.NOT_FOUND, HTTPStatus.BAD_REQUEST,
+                      HTTPStatus.INTERNAL_SERVER_ERROR, HTTPStatus.BAD_GATEWAY,
+                      HTTPStatus.SERVICE_UNAVAILABLE, HTTPStatus.REQUEST_TIMEOUT]
+
     if response.status_code != HTTPStatus.OK:
         logger.debug(response.status_code)
-        match response.status_code:
+        if response.status_code == HTTPStatus.UNAUTHORIZED or response.status_code == HTTPStatus.FORBIDDEN:
             # Due to the way the MAL API works, the error 401/403 case is very complex
             # to handle if we want our program to keep running without any errors.
-            case HTTPStatus.UNAUTHORIZED | HTTPStatus.FORBIDDEN:
-                unauthorized_cause = determine_unauthorized_cause(q)
-                response = analyze_unauthorized_cause(unauthorized_cause, url, q)
+            unauthorized_cause = determine_unauthorized_cause(q)
+            response = analyze_unauthorized_cause(unauthorized_cause, url, q)
 
-            case HTTPStatus.NOT_FOUND:  # If it's a list, user was probably deleted
+        if response.status_code == HTTPStatus.NOT_FOUND:  # If it's a list, user was probably deleted
                 # test sleep queue here
-                logger.error("Resource does not exist, moving on to next resource")
-                return None
+            logger.error("Resource does not exist, moving on to next resource")
+            return None
 
-            case HTTPStatus.BAD_REQUEST:
-                # This should never happen within the scope of the program
-                logger.error("There was a problem with the request itself,"
-                             "moving on to next resource")  #
-                return None
+        if response.status_code == HTTPStatus.BAD_REQUEST:
+            # This should never happen within the scope of the program
+            logger.error("There was a problem with the request itself,"
+                         "moving on to next resource")  #
+            return None
 
-            case HTTPStatus.INTERNAL_SERVER_ERROR | HTTPStatus.BAD_GATEWAY:
-                # If site is down, all we can do is retry every once in a while until
-                # it works.
-                logger.error(f"Internal Server Error or Bad Gateway - site is most likely down."
-                             f"Retrying in {Sleep.LONG_SLEEP} seconds.")  #
+        if response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR\
+                or response.status_code == HTTPStatus.BAD_GATEWAY\
+                or response.status_code == HTTPStatus.SERVICE_UNAVAILABLE\
+                or response.status_code == HTTPStatus.REQUEST_TIMEOUT:
+            # If site is down, all we can do is retry every once in a while until
+            # it works.
+            logger.error(f"Site is down. Retrying in {Sleep.LONG_SLEEP} seconds.")  #
+            if q:
+                add_to_queue(q, Sleep(Sleep.LONG_SLEEP))
+            time.sleep(Sleep.LONG_SLEEP)
+            response = get_search_results(url)
+
+            # if response.status_code == HTTPStatus.SERVICE_UNAVAILABLE\
+            #         or response.status_code == HTTPStatus.REQUEST_TIMEOUT:
+            #     print(f"Service Unavailable/Requested timeout. Retrying in {Sleep.LONG_SLEEP} seconds.")
+            #     logger.error(f"Service Unavailable/Requested timeout. Retrying in {Sleep.LONG_SLEEP} seconds.")
+            #     print(q)
+            #     if q:
+            #         add_to_queue(q, Sleep(Sleep.LONG_SLEEP))
+            #     time.sleep(Sleep.LONG_SLEEP)
+            #     response=get_search_results(url)
+
+        if response.status_code not in codes_to_check:
+            try:
+                logger.error(response.raise_for_status())
+                print("Unknown API Error, trying to sleep")
                 if q:
                     add_to_queue(q, Sleep(Sleep.LONG_SLEEP))
                 time.sleep(Sleep.LONG_SLEEP)
                 response = get_search_results(url)
-
-            case HTTPStatus.SERVICE_UNAVAILABLE | HTTPStatus.REQUEST_TIMEOUT:
-                print(f"Service Unavailable/Requested timeout. Retrying in {Sleep.LONG_SLEEP} seconds.")
-                logger.error(f"Service Unavailable/Requested timeout. Retrying in {Sleep.LONG_SLEEP} seconds.")
-                print(q)
-                if q:
-                    add_to_queue(q, Sleep(Sleep.LONG_SLEEP))
-                time.sleep(Sleep.LONG_SLEEP)
-                response=get_search_results(url)
-
-            case _:
-                try:
-                    logger.error(response.raise_for_status())
-                    print("Unknown API Error, trying to sleep")
-                    if q:
-                        add_to_queue(q, Sleep(Sleep.LONG_SLEEP))
-                    time.sleep(Sleep.LONG_SLEEP)
-                    response = get_search_results(url)
-                except requests.HTTPError as ex:
-                    logger.error(ex)
-                    print("Unknown API Error, cannot continue")
-                    terminate_program()
+            except requests.HTTPError as ex:
+                logger.error(ex)
+                print("Unknown API Error, cannot continue")
+                terminate_program()
 
     get_search_results.consequent_unknown_errors = 0  # If we got to this line,
     # error count is reset. The count is used by analyze_unauthorized_cause only.
@@ -566,3 +594,29 @@ def remove_zero_columns(df : pl.DataFrame):
                 df.drop_in_place(col + " Affinity")
             except ColumnNotFoundError:
                 continue
+
+
+def shuffle_df(df: pd.DataFrame):
+    return df.sample(frac=1).reset_index(drop=True)
+
+
+def handle_nans(df):
+    if df.isna().any().any():
+        print("Warning, NaNs detected")
+        has_nans_per_column = df.isna().any()
+        for col in df.columns:
+            if has_nans_per_column[col]:
+                df[col].fillna(0, inplace=True)
+    return df
+
+
+def split_list_interval(input_list, n_parts):
+    return [input_list[i::n_parts] for i in range(n_parts)]
+
+
+def print_attributes(obj):
+    for attr in dir(obj):
+        if not callable(attr) and attr.startswith("_") and not attr.startswith("__"):
+            value = getattr(obj, attr)
+            print(f"{attr} : {str(value)[:50]}")
+
