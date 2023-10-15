@@ -1,5 +1,5 @@
-from filenames import *
-from MAL_utils import *
+from .filenames import *
+from .MAL_utils import *
 
 
 class AnimeDB:

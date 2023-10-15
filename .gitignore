@@ -1,6 +1,0 @@
-# Ignore everything
-*
-
-# But don't ignore .py files
-!*.py
-!*.ipynb

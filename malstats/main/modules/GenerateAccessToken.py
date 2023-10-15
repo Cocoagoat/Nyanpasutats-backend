@@ -1,10 +1,10 @@
 import requests
 import sys
-
+from filenames import data_path
 # Client_details.txt must contain your MAL client ID on the first line,
 # and your MAL client secret on the second line.
 try:
-    with open('Client_details.txt') as f:
+    with open(data_path / "Client_details.txt") as f:
         id_secret = f.readlines()
     CLIENT_ID = id_secret[0][:-1]
     CLIENT_SECRET = id_secret[1]
@@ -12,6 +12,7 @@ except IndexError:
     print("ERROR - Client_details.txt is not in the correct format")
     sys.exit(1)
 except FileNotFoundError:
+    print(5)
     print("ERROR - Client_details.txt not found")
     sys.exit(1)
 

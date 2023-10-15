@@ -20,62 +20,62 @@ from AnimeDB import AnimeDB
 from AffinityDB import AffDBEntryCreator, GeneralData, User, AffinityDB, UserAffinityCalculator
 from Model import Model
 
-
-def get_single_tags():
-    tags = Tags()
-    counter_dict = {tag: 0 for tag in tags.all_anilist_tags}
-    for show in tags.show_tags_dict.keys():
-        tags_genres = tags.show_tags_dict[show]['Tags'] + tags.show_tags_dict[show]['Genres']
-        for tag in tags_genres:
-            try:
-                tag_name = tag['name']
-                if tag_name not in tags.all_anilist_tags:
-                    continue
-                p = tags.adjust_tag_percentage(tag['percentage'])
-            except TypeError:
-                tag_name = tag
-                p = 1
-            counter_dict[tag_name] += p
-    counter_dict_sorted = {tag: count for tag, count in
-                           sorted(counter_dict.items(), reverse=True, key=lambda x: x[1])}
-    return counter_dict_sorted
-
-
-def get_double_tags():
-    tags = Tags()
-    counter_dict_doubles = {f"<{tag1}>x<{tags.all_anilist_tags[j]}>": 0 for i, tag1 in enumerate(tags.all_anilist_tags) for
-                            j in range(i + 1, len(tags.all_anilist_tags))}
-    for show in tags.show_tags_dict.keys():
-        tags_genres = tags.show_tags_dict[show]['Tags'] + tags.show_tags_dict[show]['Genres']
-        for i, tag1 in enumerate(tags_genres):
-            try:
-                tag1_name = tag1['name']
-                if tag1_name not in tags.all_anilist_tags:
-                    continue
-                p1 = tags.adjust_tag_percentage(tag1['percentage'])
-            except TypeError:
-                tag1_name = tag1
-                p1 = 1
-
-            for j in range(i + 1, len(tags_genres)):
-                tag2 = tags_genres[j]
-                try:
-                    tag2_name = tag2['name']
-                    if tag2_name not in tags.all_anilist_tags:
-                        continue
-                    p2 = tags.adjust_tag_percentage(tag2['percentage'])
-                except TypeError:
-                    tag2_name = tag2
-                    p2 = 1
-
-                try:
-                    counter_dict_doubles[f"<{tag1_name}>x<{tag2_name}>"] += min(p1,p2)
-                except KeyError:
-                    counter_dict_doubles[f"<{tag2_name}>x<{tag1_name}>"] += min(p1,p2)
-
-    counter_dict_sorted = {tag: count for tag, count in
-                           sorted(counter_dict_doubles.items(), reverse=True, key=lambda x: x[1])}
-    return counter_dict_sorted
+#
+# def get_single_tags():
+#     tags = Tags()
+#     counter_dict = {tag: 0 for tag in tags.all_anilist_tags}
+#     for show in tags.show_tags_dict.keys():
+#         tags_genres = tags.show_tags_dict[show]['Tags'] + tags.show_tags_dict[show]['Genres']
+#         for tag in tags_genres:
+#             try:
+#                 tag_name = tag['name']
+#                 if tag_name not in tags.all_anilist_tags:
+#                     continue
+#                 p = tags.adjust_tag_percentage(tag['percentage'])
+#             except TypeError:
+#                 tag_name = tag
+#                 p = 1
+#             counter_dict[tag_name] += p
+#     counter_dict_sorted = {tag: count for tag, count in
+#                            sorted(counter_dict.items(), reverse=True, key=lambda x: x[1])}
+#     return counter_dict_sorted
+#
+#
+# def get_double_tags():
+#     tags = Tags()
+#     counter_dict_doubles = {f"<{tag1}>x<{tags.all_anilist_tags[j]}>": 0 for i, tag1 in enumerate(tags.all_anilist_tags) for
+#                             j in range(i + 1, len(tags.all_anilist_tags))}
+#     for show in tags.show_tags_dict.keys():
+#         tags_genres = tags.show_tags_dict[show]['Tags'] + tags.show_tags_dict[show]['Genres']
+#         for i, tag1 in enumerate(tags_genres):
+#             try:
+#                 tag1_name = tag1['name']
+#                 if tag1_name not in tags.all_anilist_tags:
+#                     continue
+#                 p1 = tags.adjust_tag_percentage(tag1['percentage'])
+#             except TypeError:
+#                 tag1_name = tag1
+#                 p1 = 1
+#
+#             for j in range(i + 1, len(tags_genres)):
+#                 tag2 = tags_genres[j]
+#                 try:
+#                     tag2_name = tag2['name']
+#                     if tag2_name not in tags.all_anilist_tags:
+#                         continue
+#                     p2 = tags.adjust_tag_percentage(tag2['percentage'])
+#                 except TypeError:
+#                     tag2_name = tag2
+#                     p2 = 1
+#
+#                 try:
+#                     counter_dict_doubles[f"<{tag1_name}>x<{tag2_name}>"] += min(p1,p2)
+#                 except KeyError:
+#                     counter_dict_doubles[f"<{tag2_name}>x<{tag1_name}>"] += min(p1,p2)
+#
+#     counter_dict_sorted = {tag: count for tag, count in
+#                            sorted(counter_dict_doubles.items(), reverse=True, key=lambda x: x[1])}
+#     return counter_dict_sorted
 
 if __name__ == '__main__':
     # tags = Tags()
@@ -122,16 +122,22 @@ if __name__ == '__main__':
     # # aff_db.create_minor_parts((3,10))
     # aff_db.create()
 
-    tags = Tags()
-    t = tags.entry_tags_dict
-    t2 = tags.show_tags_dict
-    all_tags = tags.all_anilist_tags
+    # tags = Tags()
+    # # aff_db = AffinityDB()
+    # # aff_db.combine()
+    # # aff_db.shuffle()
+    # # aff_db.normalize()
+    # # terminate_program()
+    # t = tags.entry_tags_dict
+    # t2 = tags.show_tags_dict
+    # t3 = tags.entry_tags_dict2
+    # all_tags = tags.all_anilist_tags
     user_db = UserDB()
     names = user_db.df['Username']
     name_index = random.randint(0, 150000)
     # name_index = 36864
     name = names[name_index]
-    model = Model("T3-1-50-RSDD.h5")
+    model = Model("T4-1-50-RSDDP.h5")
     # model.train(epochs=50)
     # model.train(epochs=50)
     print(name)

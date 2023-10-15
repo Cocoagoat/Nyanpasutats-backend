@@ -2,9 +2,9 @@ try:
     import thread
 except ImportError:
     import _thread as thread
-from filenames import *
-from MAL_utils import *
-from AnimeDB import AnimeDB
+from .filenames import *
+from .MAL_utils import *
+from .AnimeDB import AnimeDB
 
 
 class UserDB:
@@ -98,20 +98,19 @@ class UserDB:
                 df_part = self.df[i*part_size: (i+1)*part_size]
             else:
                 df_part = self.df[i*part_size:df_size]  # In case df_size/parts was rounded down by the casting
-            df_part.write_parquet(f'Partials\\'
-                                  f'{user_database_name.split(".")[0]}-P{i+1}.parquet')
+            df_part.write_parquet(f'{str(user_database_name.parent).split(".")[0]}'
+                                  f'\\{str(user_database_name.name).split(".")[0]}-P{i+1}.parquet')
 
     def get_df_part(self, i):
         try:
             print(f"Loading part {i} of user database")
-            return pl.read_parquet(f'Partials\\'
-                                   f'{user_database_name.split(".")[0]}-P{i}.parquet')
+            return pl.read_parquet(f'{str(user_database_name.parent).split(".")[0]}'
+                                   f'\\{str(user_database_name.name).split(".")[0]}-P{i+1}.parquet')
         except FileNotFoundError:
             print(f"Part {i} not found, splitting db into default 10 parts")
             self.split_df(10)
-            return pl.read_parquet(f'Partials\\'
-                                   f'{user_database_name.split(".")[0]}-P{i}.parquet')
-
+            return pl.read_parquet(f'{str(user_database_name.parent).split(".")[0]}'
+                                   f'\\{str(user_database_name.name).split(".")[0]}-P{i+1}.parquet')
 
     @property
     def scores_dict(self):
@@ -238,12 +237,12 @@ class UserDB:
         self.save_scores_dict()
         print("Finished saving")
 
-    @timeit
+    # @timeit
     def fill_main_database(self, amount):
         """ This function adds users to the main database. If empty, it will create a new one.
         The "amount" parameter is the final desired user count. """
 
-        @timeit
+        # @timeit
         def add_user_list_to_db_list(user_index, username, user_list):
             """Takes a single user's list and creates a row for them in the main database
             if user meets criteria (>50 scored shows, >30 days account_age, non-troll mean score).
@@ -346,7 +345,7 @@ class UserDB:
         # alts for those shows specifically. Since the program runs for weeks, we want to avoid wasting time
         # on filtering those as much as possible.
 
-        @timeit
+        # @timeit
         def initialize_temp_scores_dict():
             """ We use a dictionary to avoid filling the db inplace, which takes MUCH more time. The data
             is saved every save_data_per entries, after which the dictionary is reset to None values to avoid

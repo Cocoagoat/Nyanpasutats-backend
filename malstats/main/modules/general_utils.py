@@ -27,6 +27,9 @@ except ImportError:
     import _thread as thread
 from colorama import Fore
 from polars.exceptions import ColumnNotFoundError
+from .filenames import *
+# from .AffinityDB import GeneralData
+# from . import AffinityDB
 
 
 class ErrorCauses(Enum):
@@ -65,6 +68,14 @@ class Sleep:
     @time.setter
     def time(self, t):
         self._time = t
+
+
+class DjangoUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        logger.error(f"Attempting to unpickle {module}.{name}")
+        if module == "modules.GeneralData":
+            module = "main.modules.GeneralData"
+        return super().find_class(module, name)
 
 
 def call_function_through_process(func, *args):
@@ -147,7 +158,8 @@ def terminate_program():
 
 def get_headers():
     headers = {}
-    with open('Authorization.txt', "r") as f:
+    # with open('Authorization.txt', "r") as f:
+    with open(auth_filename) as f:
         headers_list = f.read().splitlines()
         if headers_list:
             headers['Authorization'] = headers_list[0]
@@ -320,8 +332,13 @@ def analyze_unauthorized_cause(unauthorized_cause, url, q=None):
 
 
 def load_pickled_file(filename):
+    test = __name__
     with open(filename, 'rb') as f:
-        pickled_file = pickle.load(f)
+        try:
+            pickled_file = pickle.load(f)
+        except ModuleNotFoundError:
+            f.seek(0)
+            pickled_file = DjangoUnpickler(f).load()
     return pickled_file
 
 
@@ -602,7 +619,7 @@ def shuffle_df(df: pd.DataFrame):
 
 def handle_nans(df):
     if df.isna().any().any():
-        print("Warning, NaNs detected")
+        # print("Warning, NaNs detected")
         has_nans_per_column = df.isna().any()
         for col in df.columns:
             if has_nans_per_column[col]:

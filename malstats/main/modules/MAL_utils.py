@@ -2,7 +2,7 @@ from __future__ import print_function
 
 from polars import ColumnNotFoundError
 
-from general_utils import *
+from .general_utils import *
 from bs4 import BeautifulSoup
 import datetime
 import time
@@ -22,7 +22,7 @@ from operator import itemgetter
 from colorama import Fore
 # from sortedcollections import OrderedSet
 import random
-from filenames import *
+from .filenames import *
 
 
 class Seasons(Enum):
@@ -1254,731 +1254,727 @@ class MediaTypes(Enum):
 
 
 # ------------------------------------------------------------------------------------------------------------
-class Data:
-    """ The main class the entire project works with. It is completely autonomous
-    thanks to properties - functions outside this class can simply access any field
-    within the class as if it exists without adding any extra logic, the class will
-    take care of creating said field (database/list/dictionary) if it does not yet exist."""
-
-    _instance=None
-
-    # unlisted_titles = ['Dragon Ball Z: The Real 4-D',
-    #                    'Seishun Buta Yarou wa Bunny Girl Senpai no Yume wo Minai Picture Drama',
-    #                    'Douluo Dalu: Hao Tian Yang Wei',
-    #                    'Douluo Dalu: Qian Hua Xi Jin',
-    #                    'Douluo Dalu: Xiaowu Juebie',
-    #                    'Douluo Dalu: Xingdou Xian Ji Pian',
-    #                    'Gintama: Nanigoto mo Saisho ga Kanjin nanode Tashou Senobisuru Kurai ga Choudoyoi']
-
-
-    def __new__(cls, *args, **kwargs):
-        """The class is a Singleton - we only need one instance of it since its purpose is
-        to house and create on demand all the data structures that are used in this project."""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls, *args, **kwargs)
-        return cls._instance
-
-    def __init__(self):
-        # All properties are loaded on demand
-        self._main_df=None
-        self._anime_df=None
-        self._MAL_user_list = None
-        self._blacklist = None
-        self._scores_dict = None
-        self._titles = None
-        self._columns=None
-        self._schema_dict=None
-
-    @property
-    def main_df(self):
-        """Polars database (stored as .parquet), contains username
-        + mean score + scored shows + all the scores of each user in it."""
-        if not isinstance(self._main_df, pl.DataFrame):
-            try:
-                print("Loading main database")
-                self._main_df = pl.read_parquet(user_database_name)
-            except FileNotFoundError:
-                print("Main database not found. Creating new main database")
-                amount = int(input("Insert the desired amount of users\n"))
-                self._main_df = pl.DataFrame(schema=self.schema_dict)
-                self.fill_main_database(amount)
-        return self._main_df
-
-    @main_df.setter
-    def main_df(self,value):
-        """Not really necessary, here just in case"""
-        if isinstance(value,pl.DataFrame):
-            self._main_df = value
-        else:
-            raise ValueError("main_df must be a Polars database")
-
-
-    # def non_sequel_main_df(self,value):
-    #     if not isinstance(self._main_df, pl.DataFrame):
-    #         try:
-    #             print("Loading partial main database")
-    #             relevant_titles = list(self.show_tags_dict.keys())
-    #             self._partial_main_df = self.main_df.select(relevant_titles)
-
-    @property
-    def scores_dict(self):
-        """A dictionary which holds the usernames of everyone in the database as keys,
-        and their respective score arrays as values. Saved in a pickle file.
-        Exists to significantly speed up real-time computation - working with the
-        Polars database would require casting and slicing during computation."""
-        if not self._scores_dict:
-            print("Unpickling main scores dictionary")
-            try:
-                self._scores_dict = load_pickled_file(scores_dict_filename)
-            except FileNotFoundError:
-                print("Pickled dictionary not found. Checking for main database")
-                if not isinstance(self._main_df, pl.DataFrame) or self._main_df.is_empty():
-                    print("Main database not found, returning empty dictionary")
-                    self._scores_dict = {}
-                    # return self._scores_dict
-                else:
-                    print("Confirmed existence of main database. Converting to dictionary")
-                    # This should never happen unless dict got manually deleted
-                    self.__main_db_to_pickled_dict()
-                    self._scores_dict = load_pickled_file(scores_dict_filename)
-            except EOFError:
-                # This should never happen after the debugging stage is over
-                print("Pickle file is corrupted, converting main database.")
-                self.__main_db_to_pickled_dict()
-                self._scores_dict = load_pickled_file(scores_dict_filename)
-        return self._scores_dict
-
-    @scores_dict.setter
-    def scores_dict(self, value):
-        """Not really necessary, here just in case"""
-        if isinstance(value, dict):
-            self._scores_dict = value
-        else:
-            raise ValueError("scores_dict must be a dictionary")
-
-    def save_scores_dict(self):
-        """Utility function just to have 1 line instead of 2"""
-        with open(scores_dict_filename, 'wb') as file:
-            pickle.dump(self.scores_dict, file)
-
-    def __main_db_to_pickled_dict(self):
-        """This function should never be used, it is only there for debug emergencies such as
-        the pickle file getting corrupted. Will take **A LOT** of memory and time because the
-        transpose function will turn our uint8 db into float64/utf8."""
-        score_df = self.main_df.select(self.titles)
-        usernames = self.main_df["Username"]
-        scores_dict = score_df.transpose(column_names=usernames).to_dict(as_series=False)
-        self._scores_dict = {key: list_to_uint8_array(value) for key, value in scores_dict.items()}
-        with open(scores_dict_filename, 'wb') as file:
-            pickle.dump(self.scores_dict, file)
-
-    @property
-    def anime_df(self):
-        """Database with info on all the anime that's listed (and ranked) on MAL.
-        Fields are as shown in the "required_fields" variable of generate_anime_DB."""
-        if not isinstance(self._anime_df, pl.DataFrame):
-            try:
-                print("Loading anime database")
-                self._anime_df = pl.read_parquet(anime_database_name)
-                print("Anime database loaded successfully")
-            except FileNotFoundError:
-                print("Anime database not found. Creating new anime database")
-                self.generate_anime_DB()
-                self._anime_df = pl.read_parquet(anime_database_name)
-        return self._anime_df
-
-    @anime_df.setter
-    def anime_df(self, value):
-        """Not really necessary, here just in case"""
-        if isinstance(value, pl.DataFrame):
-            self._anime_df = value
-        else:
-            raise ValueError("anime_df must be a Polars database")
-
-    main_db_stats = ["Index", "Username", "Mean Score", "Scored Shows"]
-
-    anime_db_stats = {'ID' : 0, 'Mean Score' : 1, 'Scores' : 2, 'Members' : 3, 'Episodes' : 4,
-                      'Duration' : 5, 'Type' : 6, 'Year' : 7, 'Season' : 8}
-
-    def get_stats_of_shows(self,show_list, relevant_stats):
-        """ Will create a dictionary that has every show in show_list as the key, and every stat in relevant_stats
-            in a list as the value.
-            Example :
-            {'Shingeki no Kyojin': {'ID': 16498.0, 'Mean Score': 8.53, 'Members': 3717089.0},
-             'Shingeki no Kyojin OVA': {'ID': 18397.0, 'Mean Score': 7.87, 'Members': 439454.0}"""
-
-        stats_dict = {}
-        for show in show_list:
-            show_dict = {}
-            for stat in relevant_stats:
-                try:
-                    show_dict[stat] = self.anime_df.filter(pl.col('Rows') == stat)[show].item()
-                except ColumnNotFoundError:
-                    break
-                except ValueError:
-                    show_dict[stat] = None
-            if show_dict:
-                stats_dict[show] = show_dict
-        return stats_dict
-
-
-    def generate_anime_DB(self,non_sequels_only=False):
-        """Creates the anime database which contains data (as defined in required_fields)
-        on every show"""
-        """""┌─────┬────────────┬────────────┬────────────┬───┬──────────┬────────────┬────────────┬────────────┐
-        │ Row ┆ Fullmetal  ┆ Shingeki   ┆ "Oshi no   ┆ … ┆ Kokuhaku ┆ Hametsu no ┆ Utsu       ┆ Tenkuu     │
-        │ s   ┆ Alchemist: ┆ no Kyojin: ┆ Ko"        ┆   ┆ ---      ┆ Mars       ┆ Musume     ┆ Danzai Ske │
-        │ --- ┆ Brotherhoo ┆ The Final  ┆ ---        ┆   ┆ f64      ┆ ---        ┆ Sayuri     ┆ lter+Heave │
-        │ str ┆ d          ┆ Se…        ┆ f64        ┆   ┆          ┆ f64        ┆ ---        ┆ n          │
-        │     ┆ ---        ┆ ---        ┆            ┆   ┆          ┆            ┆ f64        ┆ ---        │
-        │     ┆ f64        ┆ f64        ┆            ┆   ┆          ┆            ┆            ┆ f64        │
-        ╞═════╪════════════╪════════════╪════════════╪═══╪══════════╪════════════╪════════════╪════════════╡
-        │ ID  ┆ 5114.0     ┆ 51535.0    ┆ 52034.0    ┆ … ┆ 31634.0  ┆ 413.0      ┆ 13405.0    ┆ 3287.0     │
-        │ Mea ┆ 9.1        ┆ 9.08       ┆ 9.08       ┆ … ┆ 2.3      ┆ 2.22       ┆ 1.98       ┆ 1.84       │
-        │ n   ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ Sco ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ re  ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ Sco ┆ 2.004693e6 ┆ 140026.0   ┆ 134283.0   ┆ … ┆ 4847.0   ┆ 47441.0    ┆ 15790.0    ┆ 26203.0    │
-        │ res ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ Mem ┆ 3.151508e6 ┆ 409744.0   ┆ 404237.0   ┆ … ┆ 6602.0   ┆ 65349.0    ┆ 20649.0    ┆ 37022.0    │
-        │ ber ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ s   ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ Fav ┆ 216247.0   ┆ 8386.0     ┆ 12470.0    ┆ … ┆ 17.0     ┆ 297.0      ┆ 49.0       ┆ 115.0      │
-        │ ori ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ tes ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ Epi ┆ 64.0       ┆ 2.0        ┆ 11.0       ┆ … ┆ 1.0      ┆ 1.0        ┆ 1.0        ┆ 1.0        │
-        │ sod ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ es  ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ Dur ┆ 24.0       ┆ 61.0       ┆ 20.0       ┆ … ┆ 1.0      ┆ 19.0       ┆ 3.0        ┆ 19.0       │
-        │ ati ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ on  ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ Typ ┆ 1.0        ┆ 4.0        ┆ 1.0        ┆ … ┆ 5.0      ┆ 3.0        ┆ 3.0        ┆ 3.0        │
-        │ e   ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ Yea ┆ 2009.0     ┆ 2023.0     ┆ 2023.0     ┆ … ┆ 2015.0   ┆ 2005.0     ┆ 2003.0     ┆ 2004.0     │
-        │ r   ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        │ Sea ┆ 2.0        ┆ 1.0        ┆ 2.0        ┆ … ┆ 3.0      ┆ 3.0        ┆ 1.0        ┆ 4.0        │
-        │ son ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
-        └─────┴────────────┴────────────┴────────────┴───┴──────────┴────────────┴────────────┴────────────┘
-
-        """
-        def create_anime_DB_entry(anime, required_fields):
-            # Helper function, creates a list which will later serve as a column in the anime DB.
-
-            # def get_anime_duration(anime):
-            #     print(f"Currently on anime {anime['title']}")
-            #     text_duration = anime["duration"]
-            #     if not text_duration:
-            #         return None
-            #     if 'sec' in text_duration:
-            #         return 1
-            #     text_duration_split = text_duration.split()
-            #     if 'hr' in text_duration: # text_duration_split will be something like "1", "hr", "10", "min"
-            #         try:
-            #             return int(text_duration_split[0])*60 + int(text_duration_split[2])
-            #         except IndexError:  # This means the duration is "2 hr" or "1 hr" rather than "1 hr 15 min".
-            #             return int(text_duration_split[0])*60
-            #     else: #
-            #         return int(text_duration_split[0])
-
-            def parse_start_date(date_str):
-                try:
-                    date_parsed = datetime.datetime.strptime(date_str, "%Y-%m-%d")
-                    return date_parsed.year, (date_parsed.month - 1) // 3 + 1
-                except ValueError:
-                    try:
-                        date_parsed = datetime.datetime.strptime(date_str, "%Y-%m")
-                        return date_parsed.year, (date_parsed.month - 1) // 3 + 1
-                    except ValueError:
-                        return int(date_str), 1 # Only the year is known, season is assumed to be Winter (placeholder)
-
-
-            # anime_data = list((itemgetter(*required_fields))(anime))
-            anime_data = []
-            for field in fields_no_edit_needed: # This takes care of the fields that can be put into db as they are
-                anime_data.append(anime["node"][field])
-
-            # The rest of the fields need editing or error handling
-            if anime["node"]["num_episodes"]:
-                anime_data.append(anime["node"]["num_episodes"])
-            else: # This means episode_num = null, can only happen with VERY obscure shows.
-                anime_data.append(1)
-
-            if anime["node"]["average_episode_duration"]:
-                anime_data.append(round(anime["node"]["average_episode_duration"]/60,1))
-            else: # Same as above
-                anime_data.append(20)
-
-            # try:
-            #     anime_data.append(get_anime_duration(anime)) # Duration needs separate handling
-            # except ValueError:
-            #     anime_data.append(20)  # Duration not listed (most likely very obscure show), setting default.
-
-            try:
-                media_type_index = MediaTypes[anime['node']["media_type"]].value
-            except KeyError:
-                media_type_index = None
-            anime_data.append(media_type_index)
-
-            try:
-                year = int(anime["node"]["start_season"]["year"])
-                season = anime["node"]["start_season"]["season"]
-                season = Seasons[season].value # We convert the season to a numerical value for the database
-            except KeyError:
-                try:
-                    year,season = parse_start_date(anime["node"]["start_date"])
-                except KeyError:
-                    year, season = None, None
-            anime_data.append(year)
-            anime_data.append(season)
-
-            # print(anime["type"])
-            # anime_data.append(anime["aired"]["prop"]["from"]['year'])
-            # month = anime["aired"]["prop"]["from"]['month']
-            # try:
-            #     # season = Seasons((month - 1) // 3).name
-            #     season = (month - 1) // 3 + 1
-            # except TypeError:
-            #     season = None  # Sometimes the season isn't listed
-            # anime_data.append(season)
-
-            # title = anime_data[0]
-            # anime_data_dict[title] = anime_data[1:]
-
-            title = anime["node"]["title"]
-            anime_data_dict[title] = anime_data
-            return title  # Title is returned to check whether we reached the last show
-
-        def synchronize_main_dbs():
-            # missing_cols = [x for x in self.titles if x not in self.main_df.columns]
-            # for col_name in missing_cols:
-            #     self.main_df = self.main_df.with_columns(
-            #         pl.Series(col_name, [None] * len(self.main_df), dtype=pl.UInt8))
-
-            missing_cols = [x for x in self.titles if x not in self.main_df.columns]
-            for col_name in missing_cols:
-                self.main_df = self.main_df.with_columns(
-                    pl.Series(col_name, [None] * len(self.main_df), dtype=pl.UInt8))
-            self.main_df.write_parquet(user_database_name)
-
-        # def synchronize_dfs(df1,df2,cols1=None,cols2=None):
-        #     # Add all columns in db2 but not in db1 to db1
-        #     if cols1 and cols2:
-        #         missing_cols = [x for x in cols2 if x not in cols1]
-        #     else:
-        #         missing_cols = [x for x in df2.columns if x not in df1.columns]
-        #
-        #     for col_name in missing_cols:
-        #         df1 = df1.with_columns(
-        #             pl.Series(col_name, [None] * len(df1), dtype=pl.UInt8))
-        #
-        #     return df1
-            # self.main_df.write_parquet(main_database_name)
-        # synchronize_dfs()
-            # Also remove all titles that are in main but not in anime
-
-        last_show_reached = False
-        last_show = 'Tenkuu Danzai'
-        # Lowest rated show, it'll be the last one in the sorted list.
-        # Hardcoded because I'm 100% sure nothing will ever be rated
-        # lower than THAT in my lifetime. The order is a bit off using Jikan
-        # so checking for N/A score and stopping is not an option.
-
-        required_fields = ["title", "mal_id", "score",
-                           "scored_by", "members", "favorites"]
-
-        url_required_fields = ["id","mean","num_scoring_users","num_list_users","num_episodes", "average_episode_duration",
-                           "media_type","start_season", "start_date"]
-
-        fields_no_edit_needed = ["id", "mean", "num_scoring_users", "num_list_users"]
-
-        # The fields we need from the JSON object containing information about a single anime.
-
-        # anime_data_dict = {'Rows': ['ID', 'Mean Score', 'Scores',
-        #                             'Members', 'Favorites', 'Episodes', 'Duration', 'Type',  'Year', 'Season']}
-        #
-        anime_data_dict = {'Rows': ['ID', 'Mean Score', 'Scores',
-                                    'Members', 'Episodes', 'Duration', 'Type',  'Year', 'Season']}
-
-        page_num = 0
-        while not last_show_reached:
-            # We loop over pages of anime info that we get from the Jikan API (the info is
-            # sorted by score, from highest to lowest) until we reach the lowest rated show.
-            # There should be 25 shows per page/batch.
-
-            anime_batch = get_anime_batch_from_MAL(page_num, url_required_fields)
-            # url = f'https://api.jikan.moe/v4/top/anime?page={page_num}'
-            try:
-                print(f"Currently on score {anime_batch['data'][-1]['node']['mean']}")
-            except KeyError:
-                print("Finished")
-            while anime_batch is None:
-                # If we failed to get the batch for some reason, we retry until it's a success.
-                # Jikan API does not require authorization, so the only reason for a failure
-                # could be an outage in the API itself, in which case we wouldn't want to
-                # timeout/stop the function as an outage could technically last for a few hours,
-                # or even days.
-                print("Error - unable to get batch. Sleeping just to be safe, "
-                      "then trying again.")
-                logging.error("Error - unable to get batch. Sleeping just to be safe, "
-                              "then trying again.")
-                time.sleep(Sleep.LONG_SLEEP)
-                # anime_batch = call_function_through_process(get_search_results, url)
-                anime_batch = get_anime_batch_from_MAL(page_num, url_required_fields)
-                print(anime_batch)
-
-            for anime in anime_batch["data"]:
-                title = create_anime_DB_entry(anime, url_required_fields)
-                if title.startswith(last_show):
-                    last_show_reached = True
-                    break
-            page_num += 1
-        table = pa.Table.from_pydict(anime_data_dict)
-        pq.write_table(table, anime_database_name) # This creates a .parquet file from the dict
-        if self._main_df:
-            synchronize_main_dbs()
-
-    @property
-    def MAL_users_list(self):
-        """CSV list of all the usernames in the database. Not strictly necessary anymore,
-        currently serves as backup."""
-        if not self._MAL_user_list:
-            print("Loading users list")
-            try:
-                with open(MAL_users_filename, newline="", encoding='utf-8') as f:
-                    self._MAL_user_list = next(csv.reader(f, delimiter=','))
-                    print(f"{MAL_users_filename} loaded successfully")
-                    usernames = list(self.main_df['Username'])
-                    if len(self._MAL_user_list) != len(usernames):
-                        print("User list data was not up-to-date, returning updated user list")
-                        save_list_to_csv(usernames, MAL_users_filename)
-                        return usernames
-                    return self._MAL_user_list
-            except FileNotFoundError as e:
-                print("Unable to load list - CSV file not found. Returning empty list")
-                self._MAL_user_list = []
-        return self._MAL_user_list
-
-    @property
-    def blacklist(self):
-        """List of all users that didn't meet the requirements to have their lists
-        in the database. Stored here to avoid wasting an API request on checking
-        their lists again."""
-        if not self._blacklist:
-            print("Loading blacklist")
-            try:
-                with open(blacklist_users_filename, newline="", encoding='utf-8') as f:
-                    self._blacklist = next(csv.reader(f, delimiter=','))
-                    print(f"{blacklist_users_filename} loaded successfully")
-                    return self._blacklist
-            except FileNotFoundError as e:
-                print("Unable to load blacklist - file not found. Returning empty list")
-                self._blacklist = []
-        return self._blacklist
-
-    @property #change this into a normal var?
-    def schema_dict(self):
-        """The type schema of the main Polars database."""
-        if not self._schema_dict:
-            self._schema_dict = {'Index' : pl.Int64, 'Username': pl.Utf8, 'Mean Score': pl.Float32, 'Scored Shows': pl.UInt32} | \
-                                {x: y for (x, y) in zip(self.titles, [pl.UInt8] * len(self.titles))}
-        return self._schema_dict
-
-
-    @property
-    def columns(self):
-        """Columns of the main database"""
-        if not self._columns:
-            self._columns = ['Index','Username','Mean Score', 'Scored Shows'] + self.titles
-        return self._columns
-
-    @property
-    def titles(self): #change this into a normal var?
-        """A list of all the anime titles."""
-        if not self._titles:
-            self._titles = self.anime_df.columns[1:] # anime_df will automatically be generated
-            # for title in self._titles:
-            #     if title in self.unlisted_titles:
-            #         self._titles.remove(title)
-            # through the property if it doesn't exist yet
-        return self._titles
-
-    def save_main_df(self):
-        """Used during the creation of the main database. Saves all relevant files
-        (main database, user list, blacklist and scores dictionary) every N created
-        entries as defined in fill_main_database."""
-        self._main_df.write_parquet(user_database_name)
-        usernames = list(self._main_df['Username'])
-        print(f"Saving MAL user list. Length is {len(usernames)}")
-        save_list_to_csv(usernames,MAL_users_filename)
-        print(f"Saving blacklist. Length is {len(self._blacklist)}")
-        save_list_to_csv(self._blacklist,blacklist_users_filename)
-        print(f"Saving scores dictionary")
-        self.save_scores_dict()
-        print("Finished saving")
-
-
-    @timeit
-    def fill_main_database(self,amount):
-        """ This function adds users to the main database. If empty, it will create a new one.
-        The "amount" parameter is the final desired user count. """
-
-        @timeit
-        def add_user_list_to_db_list(user_index, username, user_list):
-            """Takes a single user's list and creates a row for them in the main database
-            if user meets criteria (>50 scored shows, >30 days account_age, non-troll mean score).
-            returns True if user was added, False otherwise."""
-
-            current_time = datetime.datetime.now(datetime.timezone.utc)
-            account_age_threshold = datetime.timedelta(days=30)
-            min_scored_shows = 50  # User needs to have scored at least 50 shows to be part of the DB
-            user_scored_shows = count_scored_shows(user_list)
-
-            if user_scored_shows >= min_scored_shows:
-                show_amount = 0
-                score_sum = 0
-                account_age_verified = False
-                for anime in user_list:
-                    title = anime['node']['title']
-                    score = anime['list_status']['score']
-
-                    if score == 0:
-                        actual_user_index = user_index + initial_users + saved_so_far
-                        print(f'Finished processing {show_amount} shows of user {username} ({actual_user_index})')
-                        break
-
-                    else:
-                        if not account_age_verified:
-                            update_timestamp = anime['list_status']['updated_at']
-                            time_since_update = current_time - datetime.datetime.fromisoformat(update_timestamp)
-                            if time_since_update > account_age_threshold:
-                                account_age_verified = True
-                        # We test whether the account is at least one month old by seeing if at least one
-                        # anime update was done more than a month ago.
-                        show_amount += 1
-
-                        if title in self.titles:
-                            scores_db_dict[title][user_index] = score
-                        score_sum += score
-
-                mean_score = round(score_sum / show_amount, 4)
-
-                if 2 <= mean_score <= 9.7:  # First we filter by scores, < 2 and > 9.7 means will just clutter the data
-                    if not account_age_verified:  # If we couldn't verify through the anime list, we check the
-                        # user's page directly. We only want to use this as a last resort since unlike the
-                        # former it takes another API call to do so.
-                        account_age = check_account_age_directly(username)
-                        if account_age < account_age_threshold:
-                            print(f"{username}'s account is {account_age} old, likely a troll")
-                            return False
-                        print(f"{username}'s account is {account_age} old, user verified. Adding to database")
-                    scores_db_dict['Index'][user_index] = current_users
-                    scores_db_dict['Username'][user_index] = username
-                    scores_db_dict['Scored Shows'][user_index] = show_amount
-                    scores_db_dict['Mean Score'][user_index] = mean_score
-                    new_user_list = list_to_uint8_array([scores_db_dict[key][user_index]
-                                                         for key in self.titles])
-                    self.scores_dict[username] = new_user_list
-                    return True
-                else:
-                    print(f"{username} has no meaningful scores, proceeding to next user")
-                    return False
-            print(f"{username} has less than 50 scored shows, proceeding to next user")
-            return False
-
-        def save_data():
-
-            print(f"Saving database. Currently on {current_users} entries")
-            logger.debug(f"Saving database. Currently on {current_users} entries")
-
-            # First we create a df from the temporary dictionary. Then we concatenate
-            # it with the existing database.
-            nonlocal saved_so_far
-            temp_df = pl.DataFrame(scores_db_dict, schema=self.schema_dict)
-            saved_so_far += temp_df.shape[0]
-
-            try:
-                self._main_df = pl.concat(
-                    [
-                        self._main_df,
-                        temp_df,
-                    ],
-                    how="vertical",
-                )
-            except ValueError:
-                self._main_df = temp_df
-
-            # After we concatenated the main and temp databases, we need to save all the
-            # necessary files (polars db, user list + blacklist and scores dict)
-            # to avoid losing data in case the program stops for whatever reason.
-            self.save_main_df()
-
-        save_data_per = 100
-        saved_so_far = 0
-        min_scored_amount = 75000
-        max_scored_amount = 500000
-
-        # We want to take usernames from shows that are not TOO popular, but also not too niche.
-        # The reason for this is that the update table of a niche show will include many troll accounts
-        # that basically either put everything in their list, or are score-boosting alts with many shows.
-        # The update table of a very popular show like Attack on Titan on the other hand, will include many
-        # people that have just started watching anime, and thus only have a few shows in their list + score-boosting
-        # alts for those shows specifically. Since the program runs for weeks, we want to avoid wasting time
-        # on filtering those as much as possible.
-
-        @timeit
-        def initialize_temp_scores_dict():
-            """ We use a dictionary to avoid filling the db inplace, which takes MUCH more time. The data
-            is saved every save_data_per entries, after which the dictionary is reset to None values to avoid
-            it getting huge and taking up memory."""
-            remaining_amount = amount - current_users
-            for key in self.columns:
-                scores_db_dict[key] = [None] * min(save_data_per, remaining_amount)
-
-        # ------------------------------ Main function starts here ----------------------------
-
-        scores_db_dict = {}
-        """This dictionary exists as temporary storage for user lists. Instead creating a new polars row
-        and adding it to the database as we get it, we add it to this dictionary. Then, each
-        save_data_per entries, we convert that dictionary to a Polars dataframe and concatenate
-        it with the main one. This results in significant speedup."""
-
-        current_users = len(self.MAL_users_list)
-        initial_users = current_users
-
-        rows = self.anime_df.rows()
-        ids = rows[0][1:]
-        scored_amount = rows[2][1:]
-
-        initialize_temp_scores_dict()
-
-        print(f"Starting MAL user length/database size is : {len(self.MAL_users_list)}")
-        print(f"Starting Blacklist length is : {len(self.blacklist)}")
-
-        ids_titles_scored = list(zip(ids, self.titles, scored_amount))
-        shuffle(ids_titles_scored)  # Shuffle to start getting users from a random show, not the top shows
-        # We start by iterating over the shows we have in our show DB. Then, for each show, we get 375 usernames.
-        while True:
-            for id, title, scored_amount in ids_titles_scored:
-                if not scored_amount or int(scored_amount) < min_scored_amount \
-                                or int(scored_amount) > max_scored_amount:
-                    print(f"Scored amount of {title} is {scored_amount}, moving to next show")
-                    continue
-                print(f"Scored amount of {title} is {scored_amount}, proceeding with current show")
-
-                title = replace_characters_for_url(title)
-                base_url = f"https://myanimelist.net/anime/{id}/{title}/stats?"
-                print(base_url)
-                users_table = get_usernames_from_show(base_url)
-                # This returns a table of list updates
-
-                for table_row in users_table:
-                    # The list update table includes usernames, timestamps and more.
-                    # We extract the usernames from there by their assigned CSS class.
-                    if current_users == amount:
-                        break
-
-                    user_link = table_row.findNext(
-                        "div", {"class": "di-tc va-m al pl4"}).findNext("a")
-                    user_name = str(user_link.string) # This thing is actually a bs4.SoupString,
-                    # not a regular Python string.
-
-                    if user_name not in self.MAL_users_list and user_name not in self.blacklist:
-
-                        if user_name.startswith('ishinashi'):
-                            logger.debug("Retard troll detected, continuing on")
-                            continue
-
-                        user_anime_list = get_user_MAL_list(user_name, full_list=False)
-                        dict_user_index = current_users - initial_users - saved_so_far
-                        added = add_user_list_to_db_list(dict_user_index,
-                                                         user_name, user_anime_list)
-
-                        if added:
-                            current_users += 1
-                            self.MAL_users_list.append(user_name)
-                            if (current_users - initial_users) % save_data_per == 0:
-                                # We save the database and the lists every n users just to be safe
-                                save_data()
-                                if current_users == amount:
-                                    return
-                                initialize_temp_scores_dict()
-                        else:
-                            self.blacklist.append(user_name)
-                    else:
-                        print(f"{user_name} has already been added/blacklisted, moving on to next user")
-
-                if current_users == amount:
-                    save_data()
-                    # We reached the necessary amount of users in the database
-                    return
-
-    def main_df_user_indexes(self):
-        pass
-
-
-    def create_user_entry(self,user_name):
-        """Creates a user entry for the one we're calculating affinity for + returns a Polars row of their stats.
-        Currently not in use due to being time-inefficient at adding in real-time. New process maybe?"""
-        if user_name not in self.MAL_users_list and user_name not in self.blacklist:
-            user_list = get_user_MAL_list(user_name, full_list=False)
-            if not user_list:
-                print("Unable to access private user list. Please make your list public and try again.")
-                terminate_program()
-        else:
-            print("User already exists in database")
-            return
-
-        old_titles = [x for x in self.main_df.columns if x not in self.main_db_stats]
-
-        anime_indexes = {v: k for (k, v) in enumerate(old_titles)}
-        # new_list = [None] * len(self.titles)
-        new_list = [None] * (len(old_titles))
-
-        show_amount = 0
-        score_sum = 0
-        for anime in user_list:  # anime_list, scores_db
-            title = anime['node']['title']
-            score = anime['list_status']['score']
-            if score == 0:
-                break
-            show_amount += 1
-            if title in self.titles:
-                new_list[anime_indexes[title]] = score
-            score_sum += score
-
-        mean_score = round(score_sum / show_amount, 4)
-        new_list_for_return = list_to_uint8_array(new_list)  # We save the original list here,
-        # because later we'll have to add fields that are relevant for adding to DB but not for list comparison.
-
-        if 2 <= mean_score <= 9.7:  # Removing troll accounts/people who score everything 10/10
-            index = self.main_df.shape[0]
-            new_list = [index,user_name,mean_score,show_amount] + new_list
-
-            schema_dict = {'Index' : pl.Int64, 'Username': pl.Utf8, 'Mean Score': pl.Float32, 'Scored Shows': pl.UInt32} | \
-                          {x: y for (x, y) in zip(old_titles, [pl.UInt8] * len(old_titles))}
-            # cols = ['Index', 'Username', 'Mean Score', 'Scored Shows'] + self.titles
-
-            new_dict = {k : v for k,v in zip(self.main_df.columns, new_list)}
-
-            new_row = pl.DataFrame(new_dict,schema=schema_dict)
-            print(new_row)
-
-            # new_row = synchronize_dfs(new_row,self.main_df)
-            self.main_df = pl.concat(
-                [
-                    self.main_df,
-                    new_row,
-                ],
-                how="vertical",
-            )
-
-            self.main_df.write_parquet(user_database_name)
-            self.MAL_users_list.append(user_name)
-            save_list_to_csv(self.MAL_users_list,MAL_users_filename)
-        return new_list_for_return
-
-
-
+# class Data:
+#     """ The main class the entire project works with. It is completely autonomous
+#     thanks to properties - functions outside this class can simply access any field
+#     within the class as if it exists without adding any extra logic, the class will
+#     take care of creating said field (database/list/dictionary) if it does not yet exist."""
+#
+#     _instance=None
+#
+#     # unlisted_titles = ['Dragon Ball Z: The Real 4-D',
+#     #                    'Seishun Buta Yarou wa Bunny Girl Senpai no Yume wo Minai Picture Drama',
+#     #                    'Douluo Dalu: Hao Tian Yang Wei',
+#     #                    'Douluo Dalu: Qian Hua Xi Jin',
+#     #                    'Douluo Dalu: Xiaowu Juebie',
+#     #                    'Douluo Dalu: Xingdou Xian Ji Pian',
+#     #                    'Gintama: Nanigoto mo Saisho ga Kanjin nanode Tashou Senobisuru Kurai ga Choudoyoi']
+#
+#
+#     def __new__(cls, *args, **kwargs):
+#         """The class is a Singleton - we only need one instance of it since its purpose is
+#         to house and create on demand all the data structures that are used in this project."""
+#         if cls._instance is None:
+#             cls._instance = super().__new__(cls, *args, **kwargs)
+#         return cls._instance
+#
+#     def __init__(self):
+#         # All properties are loaded on demand
+#         self._main_df=None
+#         self._anime_df=None
+#         self._MAL_user_list = None
+#         self._blacklist = None
+#         self._scores_dict = None
+#         self._titles = None
+#         self._columns=None
+#         self._schema_dict=None
+#
+#     @property
+#     def main_df(self):
+#         """Polars database (stored as .parquet), contains username
+#         + mean score + scored shows + all the scores of each user in it."""
+#         if not isinstance(self._main_df, pl.DataFrame):
+#             try:
+#                 print("Loading main database")
+#                 self._main_df = pl.read_parquet(user_database_name)
+#             except FileNotFoundError:
+#                 print("Main database not found. Creating new main database")
+#                 amount = int(input("Insert the desired amount of users\n"))
+#                 self._main_df = pl.DataFrame(schema=self.schema_dict)
+#                 self.fill_main_database(amount)
+#         return self._main_df
+#
+#     @main_df.setter
+#     def main_df(self,value):
+#         """Not really necessary, here just in case"""
+#         if isinstance(value,pl.DataFrame):
+#             self._main_df = value
+#         else:
+#             raise ValueError("main_df must be a Polars database")
+#
+#
+#     # def non_sequel_main_df(self,value):
+#     #     if not isinstance(self._main_df, pl.DataFrame):
+#     #         try:
+#     #             print("Loading partial main database")
+#     #             relevant_titles = list(self.show_tags_dict.keys())
+#     #             self._partial_main_df = self.main_df.select(relevant_titles)
+#
+#     @property
+#     def scores_dict(self):
+#         """A dictionary which holds the usernames of everyone in the database as keys,
+#         and their respective score arrays as values. Saved in a pickle file.
+#         Exists to significantly speed up real-time computation - working with the
+#         Polars database would require casting and slicing during computation."""
+#         if not self._scores_dict:
+#             print("Unpickling main scores dictionary")
+#             try:
+#                 self._scores_dict = load_pickled_file(scores_dict_filename)
+#             except FileNotFoundError:
+#                 print("Pickled dictionary not found. Checking for main database")
+#                 if not isinstance(self._main_df, pl.DataFrame) or self._main_df.is_empty():
+#                     print("Main database not found, returning empty dictionary")
+#                     self._scores_dict = {}
+#                     # return self._scores_dict
+#                 else:
+#                     print("Confirmed existence of main database. Converting to dictionary")
+#                     # This should never happen unless dict got manually deleted
+#                     self.__main_db_to_pickled_dict()
+#                     self._scores_dict = load_pickled_file(scores_dict_filename)
+#             except EOFError:
+#                 # This should never happen after the debugging stage is over
+#                 print("Pickle file is corrupted, converting main database.")
+#                 self.__main_db_to_pickled_dict()
+#                 self._scores_dict = load_pickled_file(scores_dict_filename)
+#         return self._scores_dict
+#
+#     @scores_dict.setter
+#     def scores_dict(self, value):
+#         """Not really necessary, here just in case"""
+#         if isinstance(value, dict):
+#             self._scores_dict = value
+#         else:
+#             raise ValueError("scores_dict must be a dictionary")
+#
+#     def save_scores_dict(self):
+#         """Utility function just to have 1 line instead of 2"""
+#         with open(scores_dict_filename, 'wb') as file:
+#             pickle.dump(self.scores_dict, file)
+#
+#     def __main_db_to_pickled_dict(self):
+#         """This function should never be used, it is only there for debug emergencies such as
+#         the pickle file getting corrupted. Will take **A LOT** of memory and time because the
+#         transpose function will turn our uint8 db into float64/utf8."""
+#         score_df = self.main_df.select(self.titles)
+#         usernames = self.main_df["Username"]
+#         scores_dict = score_df.transpose(column_names=usernames).to_dict(as_series=False)
+#         self._scores_dict = {key: list_to_uint8_array(value) for key, value in scores_dict.items()}
+#         with open(scores_dict_filename, 'wb') as file:
+#             pickle.dump(self.scores_dict, file)
+#
+#     @property
+#     def anime_df(self):
+#         """Database with info on all the anime that's listed (and ranked) on MAL.
+#         Fields are as shown in the "required_fields" variable of generate_anime_DB."""
+#         if not isinstance(self._anime_df, pl.DataFrame):
+#             try:
+#                 print("Loading anime database")
+#                 self._anime_df = pl.read_parquet(anime_database_name)
+#                 print("Anime database loaded successfully")
+#             except FileNotFoundError:
+#                 print("Anime database not found. Creating new anime database")
+#                 self.generate_anime_DB()
+#                 self._anime_df = pl.read_parquet(anime_database_name)
+#         return self._anime_df
+#
+#     @anime_df.setter
+#     def anime_df(self, value):
+#         """Not really necessary, here just in case"""
+#         if isinstance(value, pl.DataFrame):
+#             self._anime_df = value
+#         else:
+#             raise ValueError("anime_df must be a Polars database")
+#
+#     main_db_stats = ["Index", "Username", "Mean Score", "Scored Shows"]
+#
+#     anime_db_stats = {'ID' : 0, 'Mean Score' : 1, 'Scores' : 2, 'Members' : 3, 'Episodes' : 4,
+#                       'Duration' : 5, 'Type' : 6, 'Year' : 7, 'Season' : 8}
+#
+#     def get_stats_of_shows(self,show_list, relevant_stats):
+#         """ Will create a dictionary that has every show in show_list as the key, and every stat in relevant_stats
+#             in a list as the value.
+#             Example :
+#             {'Shingeki no Kyojin': {'ID': 16498.0, 'Mean Score': 8.53, 'Members': 3717089.0},
+#              'Shingeki no Kyojin OVA': {'ID': 18397.0, 'Mean Score': 7.87, 'Members': 439454.0}"""
+#
+#         stats_dict = {}
+#         for show in show_list:
+#             show_dict = {}
+#             for stat in relevant_stats:
+#                 try:
+#                     show_dict[stat] = self.anime_df.filter(pl.col('Rows') == stat)[show].item()
+#                 except ColumnNotFoundError:
+#                     break
+#                 except ValueError:
+#                     show_dict[stat] = None
+#             if show_dict:
+#                 stats_dict[show] = show_dict
+#         return stats_dict
+#
+#
+#     def generate_anime_DB(self,non_sequels_only=False):
+#         """Creates the anime database which contains data (as defined in required_fields)
+#         on every show"""
+#         """""┌─────┬────────────┬────────────┬────────────┬───┬──────────┬────────────┬────────────┬────────────┐
+#         │ Row ┆ Fullmetal  ┆ Shingeki   ┆ "Oshi no   ┆ … ┆ Kokuhaku ┆ Hametsu no ┆ Utsu       ┆ Tenkuu     │
+#         │ s   ┆ Alchemist: ┆ no Kyojin: ┆ Ko"        ┆   ┆ ---      ┆ Mars       ┆ Musume     ┆ Danzai Ske │
+#         │ --- ┆ Brotherhoo ┆ The Final  ┆ ---        ┆   ┆ f64      ┆ ---        ┆ Sayuri     ┆ lter+Heave │
+#         │ str ┆ d          ┆ Se…        ┆ f64        ┆   ┆          ┆ f64        ┆ ---        ┆ n          │
+#         │     ┆ ---        ┆ ---        ┆            ┆   ┆          ┆            ┆ f64        ┆ ---        │
+#         │     ┆ f64        ┆ f64        ┆            ┆   ┆          ┆            ┆            ┆ f64        │
+#         ╞═════╪════════════╪════════════╪════════════╪═══╪══════════╪════════════╪════════════╪════════════╡
+#         │ ID  ┆ 5114.0     ┆ 51535.0    ┆ 52034.0    ┆ … ┆ 31634.0  ┆ 413.0      ┆ 13405.0    ┆ 3287.0     │
+#         │ Mea ┆ 9.1        ┆ 9.08       ┆ 9.08       ┆ … ┆ 2.3      ┆ 2.22       ┆ 1.98       ┆ 1.84       │
+#         │ n   ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ Sco ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ re  ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ Sco ┆ 2.004693e6 ┆ 140026.0   ┆ 134283.0   ┆ … ┆ 4847.0   ┆ 47441.0    ┆ 15790.0    ┆ 26203.0    │
+#         │ res ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ Mem ┆ 3.151508e6 ┆ 409744.0   ┆ 404237.0   ┆ … ┆ 6602.0   ┆ 65349.0    ┆ 20649.0    ┆ 37022.0    │
+#         │ ber ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ s   ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ Fav ┆ 216247.0   ┆ 8386.0     ┆ 12470.0    ┆ … ┆ 17.0     ┆ 297.0      ┆ 49.0       ┆ 115.0      │
+#         │ ori ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ tes ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ Epi ┆ 64.0       ┆ 2.0        ┆ 11.0       ┆ … ┆ 1.0      ┆ 1.0        ┆ 1.0        ┆ 1.0        │
+#         │ sod ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ es  ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ Dur ┆ 24.0       ┆ 61.0       ┆ 20.0       ┆ … ┆ 1.0      ┆ 19.0       ┆ 3.0        ┆ 19.0       │
+#         │ ati ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ on  ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ Typ ┆ 1.0        ┆ 4.0        ┆ 1.0        ┆ … ┆ 5.0      ┆ 3.0        ┆ 3.0        ┆ 3.0        │
+#         │ e   ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ Yea ┆ 2009.0     ┆ 2023.0     ┆ 2023.0     ┆ … ┆ 2015.0   ┆ 2005.0     ┆ 2003.0     ┆ 2004.0     │
+#         │ r   ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         │ Sea ┆ 2.0        ┆ 1.0        ┆ 2.0        ┆ … ┆ 3.0      ┆ 3.0        ┆ 1.0        ┆ 4.0        │
+#         │ son ┆            ┆            ┆            ┆   ┆          ┆            ┆            ┆            │
+#         └─────┴────────────┴────────────┴────────────┴───┴──────────┴────────────┴────────────┴────────────┘
+#
+#         """
+#         def create_anime_DB_entry(anime, required_fields):
+#             # Helper function, creates a list which will later serve as a column in the anime DB.
+#
+#             # def get_anime_duration(anime):
+#             #     print(f"Currently on anime {anime['title']}")
+#             #     text_duration = anime["duration"]
+#             #     if not text_duration:
+#             #         return None
+#             #     if 'sec' in text_duration:
+#             #         return 1
+#             #     text_duration_split = text_duration.split()
+#             #     if 'hr' in text_duration: # text_duration_split will be something like "1", "hr", "10", "min"
+#             #         try:
+#             #             return int(text_duration_split[0])*60 + int(text_duration_split[2])
+#             #         except IndexError:  # This means the duration is "2 hr" or "1 hr" rather than "1 hr 15 min".
+#             #             return int(text_duration_split[0])*60
+#             #     else: #
+#             #         return int(text_duration_split[0])
+#
+#             def parse_start_date(date_str):
+#                 try:
+#                     date_parsed = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+#                     return date_parsed.year, (date_parsed.month - 1) // 3 + 1
+#                 except ValueError:
+#                     try:
+#                         date_parsed = datetime.datetime.strptime(date_str, "%Y-%m")
+#                         return date_parsed.year, (date_parsed.month - 1) // 3 + 1
+#                     except ValueError:
+#                         return int(date_str), 1 # Only the year is known, season is assumed to be Winter (placeholder)
+#
+#
+#             # anime_data = list((itemgetter(*required_fields))(anime))
+#             anime_data = []
+#             for field in fields_no_edit_needed: # This takes care of the fields that can be put into db as they are
+#                 anime_data.append(anime["node"][field])
+#
+#             # The rest of the fields need editing or error handling
+#             if anime["node"]["num_episodes"]:
+#                 anime_data.append(anime["node"]["num_episodes"])
+#             else: # This means episode_num = null, can only happen with VERY obscure shows.
+#                 anime_data.append(1)
+#
+#             if anime["node"]["average_episode_duration"]:
+#                 anime_data.append(round(anime["node"]["average_episode_duration"]/60,1))
+#             else: # Same as above
+#                 anime_data.append(20)
+#
+#             # try:
+#             #     anime_data.append(get_anime_duration(anime)) # Duration needs separate handling
+#             # except ValueError:
+#             #     anime_data.append(20)  # Duration not listed (most likely very obscure show), setting default.
+#
+#             try:
+#                 media_type_index = MediaTypes[anime['node']["media_type"]].value
+#             except KeyError:
+#                 media_type_index = None
+#             anime_data.append(media_type_index)
+#
+#             try:
+#                 year = int(anime["node"]["start_season"]["year"])
+#                 season = anime["node"]["start_season"]["season"]
+#                 season = Seasons[season].value # We convert the season to a numerical value for the database
+#             except KeyError:
+#                 try:
+#                     year,season = parse_start_date(anime["node"]["start_date"])
+#                 except KeyError:
+#                     year, season = None, None
+#             anime_data.append(year)
+#             anime_data.append(season)
+#
+#             # print(anime["type"])
+#             # anime_data.append(anime["aired"]["prop"]["from"]['year'])
+#             # month = anime["aired"]["prop"]["from"]['month']
+#             # try:
+#             #     # season = Seasons((month - 1) // 3).name
+#             #     season = (month - 1) // 3 + 1
+#             # except TypeError:
+#             #     season = None  # Sometimes the season isn't listed
+#             # anime_data.append(season)
+#
+#             # title = anime_data[0]
+#             # anime_data_dict[title] = anime_data[1:]
+#
+#             title = anime["node"]["title"]
+#             anime_data_dict[title] = anime_data
+#             return title  # Title is returned to check whether we reached the last show
+#
+#         def synchronize_main_dbs():
+#             # missing_cols = [x for x in self.titles if x not in self.main_df.columns]
+#             # for col_name in missing_cols:
+#             #     self.main_df = self.main_df.with_columns(
+#             #         pl.Series(col_name, [None] * len(self.main_df), dtype=pl.UInt8))
+#
+#             missing_cols = [x for x in self.titles if x not in self.main_df.columns]
+#             for col_name in missing_cols:
+#                 self.main_df = self.main_df.with_columns(
+#                     pl.Series(col_name, [None] * len(self.main_df), dtype=pl.UInt8))
+#             self.main_df.write_parquet(user_database_name)
+#
+#         # def synchronize_dfs(df1,df2,cols1=None,cols2=None):
+#         #     # Add all columns in db2 but not in db1 to db1
+#         #     if cols1 and cols2:
+#         #         missing_cols = [x for x in cols2 if x not in cols1]
+#         #     else:
+#         #         missing_cols = [x for x in df2.columns if x not in df1.columns]
+#         #
+#         #     for col_name in missing_cols:
+#         #         df1 = df1.with_columns(
+#         #             pl.Series(col_name, [None] * len(df1), dtype=pl.UInt8))
+#         #
+#         #     return df1
+#             # self.main_df.write_parquet(main_database_name)
+#         # synchronize_dfs()
+#             # Also remove all titles that are in main but not in anime
+#
+#         last_show_reached = False
+#         last_show = 'Tenkuu Danzai'
+#         # Lowest rated show, it'll be the last one in the sorted list.
+#         # Hardcoded because I'm 100% sure nothing will ever be rated
+#         # lower than THAT in my lifetime. The order is a bit off using Jikan
+#         # so checking for N/A score and stopping is not an option.
+#
+#         required_fields = ["title", "mal_id", "score",
+#                            "scored_by", "members", "favorites"]
+#
+#         url_required_fields = ["id","mean","num_scoring_users","num_list_users","num_episodes", "average_episode_duration",
+#                            "media_type","start_season", "start_date"]
+#
+#         fields_no_edit_needed = ["id", "mean", "num_scoring_users", "num_list_users"]
+#
+#         # The fields we need from the JSON object containing information about a single anime.
+#
+#         # anime_data_dict = {'Rows': ['ID', 'Mean Score', 'Scores',
+#         #                             'Members', 'Favorites', 'Episodes', 'Duration', 'Type',  'Year', 'Season']}
+#         #
+#         anime_data_dict = {'Rows': ['ID', 'Mean Score', 'Scores',
+#                                     'Members', 'Episodes', 'Duration', 'Type',  'Year', 'Season']}
+#
+#         page_num = 0
+#         while not last_show_reached:
+#             # We loop over pages of anime info that we get from the Jikan API (the info is
+#             # sorted by score, from highest to lowest) until we reach the lowest rated show.
+#             # There should be 25 shows per page/batch.
+#
+#             anime_batch = get_anime_batch_from_MAL(page_num, url_required_fields)
+#             # url = f'https://api.jikan.moe/v4/top/anime?page={page_num}'
+#             try:
+#                 print(f"Currently on score {anime_batch['data'][-1]['node']['mean']}")
+#             except KeyError:
+#                 print("Finished")
+#             while anime_batch is None:
+#                 # If we failed to get the batch for some reason, we retry until it's a success.
+#                 # Jikan API does not require authorization, so the only reason for a failure
+#                 # could be an outage in the API itself, in which case we wouldn't want to
+#                 # timeout/stop the function as an outage could technically last for a few hours,
+#                 # or even days.
+#                 print("Error - unable to get batch. Sleeping just to be safe, "
+#                       "then trying again.")
+#                 logging.error("Error - unable to get batch. Sleeping just to be safe, "
+#                               "then trying again.")
+#                 time.sleep(Sleep.LONG_SLEEP)
+#                 # anime_batch = call_function_through_process(get_search_results, url)
+#                 anime_batch = get_anime_batch_from_MAL(page_num, url_required_fields)
+#                 print(anime_batch)
+#
+#             for anime in anime_batch["data"]:
+#                 title = create_anime_DB_entry(anime, url_required_fields)
+#                 if title.startswith(last_show):
+#                     last_show_reached = True
+#                     break
+#             page_num += 1
+#         table = pa.Table.from_pydict(anime_data_dict)
+#         pq.write_table(table, anime_database_name) # This creates a .parquet file from the dict
+#         if self._main_df:
+#             synchronize_main_dbs()
+#
+#     @property
+#     def MAL_users_list(self):
+#         """CSV list of all the usernames in the database. Not strictly necessary anymore,
+#         currently serves as backup."""
+#         if not self._MAL_user_list:
+#             print("Loading users list")
+#             try:
+#                 with open(MAL_users_filename, newline="", encoding='utf-8') as f:
+#                     self._MAL_user_list = next(csv.reader(f, delimiter=','))
+#                     print(f"{MAL_users_filename} loaded successfully")
+#                     usernames = list(self.main_df['Username'])
+#                     if len(self._MAL_user_list) != len(usernames):
+#                         print("User list data was not up-to-date, returning updated user list")
+#                         save_list_to_csv(usernames, MAL_users_filename)
+#                         return usernames
+#                     return self._MAL_user_list
+#             except FileNotFoundError as e:
+#                 print("Unable to load list - CSV file not found. Returning empty list")
+#                 self._MAL_user_list = []
+#         return self._MAL_user_list
+#
+#     @property
+#     def blacklist(self):
+#         """List of all users that didn't meet the requirements to have their lists
+#         in the database. Stored here to avoid wasting an API request on checking
+#         their lists again."""
+#         if not self._blacklist:
+#             print("Loading blacklist")
+#             try:
+#                 with open(blacklist_users_filename, newline="", encoding='utf-8') as f:
+#                     self._blacklist = next(csv.reader(f, delimiter=','))
+#                     print(f"{blacklist_users_filename} loaded successfully")
+#                     return self._blacklist
+#             except FileNotFoundError as e:
+#                 print("Unable to load blacklist - file not found. Returning empty list")
+#                 self._blacklist = []
+#         return self._blacklist
+#
+#     @property #change this into a normal var?
+#     def schema_dict(self):
+#         """The type schema of the main Polars database."""
+#         if not self._schema_dict:
+#             self._schema_dict = {'Index' : pl.Int64, 'Username': pl.Utf8, 'Mean Score': pl.Float32, 'Scored Shows': pl.UInt32} | \
+#                                 {x: y for (x, y) in zip(self.titles, [pl.UInt8] * len(self.titles))}
+#         return self._schema_dict
+#
+#
+#     @property
+#     def columns(self):
+#         """Columns of the main database"""
+#         if not self._columns:
+#             self._columns = ['Index','Username','Mean Score', 'Scored Shows'] + self.titles
+#         return self._columns
+#
+#     @property
+#     def titles(self): #change this into a normal var?
+#         """A list of all the anime titles."""
+#         if not self._titles:
+#             self._titles = self.anime_df.columns[1:] # anime_df will automatically be generated
+#             # for title in self._titles:
+#             #     if title in self.unlisted_titles:
+#             #         self._titles.remove(title)
+#             # through the property if it doesn't exist yet
+#         return self._titles
+#
+#     def save_main_df(self):
+#         """Used during the creation of the main database. Saves all relevant files
+#         (main database, user list, blacklist and scores dictionary) every N created
+#         entries as defined in fill_main_database."""
+#         self._main_df.write_parquet(user_database_name)
+#         usernames = list(self._main_df['Username'])
+#         print(f"Saving MAL user list. Length is {len(usernames)}")
+#         save_list_to_csv(usernames,MAL_users_filename)
+#         print(f"Saving blacklist. Length is {len(self._blacklist)}")
+#         save_list_to_csv(self._blacklist,blacklist_users_filename)
+#         print(f"Saving scores dictionary")
+#         self.save_scores_dict()
+#         print("Finished saving")
+#
+#     @timeit
+#     def fill_main_database(self,amount):
+#         """ This function adds users to the main database. If empty, it will create a new one.
+#         The "amount" parameter is the final desired user count. """
+#
+#         @timeit
+#         def add_user_list_to_db_list(user_index, username, user_list):
+#             """Takes a single user's list and creates a row for them in the main database
+#             if user meets criteria (>50 scored shows, >30 days account_age, non-troll mean score).
+#             returns True if user was added, False otherwise."""
+#
+#             current_time = datetime.datetime.now(datetime.timezone.utc)
+#             account_age_threshold = datetime.timedelta(days=30)
+#             min_scored_shows = 50  # User needs to have scored at least 50 shows to be part of the DB
+#             user_scored_shows = count_scored_shows(user_list)
+#
+#             if user_scored_shows >= min_scored_shows:
+#                 show_amount = 0
+#                 score_sum = 0
+#                 account_age_verified = False
+#                 for anime in user_list:
+#                     title = anime['node']['title']
+#                     score = anime['list_status']['score']
+#
+#                     if score == 0:
+#                         actual_user_index = user_index + initial_users + saved_so_far
+#                         print(f'Finished processing {show_amount} shows of user {username} ({actual_user_index})')
+#                         break
+#
+#                     else:
+#                         if not account_age_verified:
+#                             update_timestamp = anime['list_status']['updated_at']
+#                             time_since_update = current_time - datetime.datetime.fromisoformat(update_timestamp)
+#                             if time_since_update > account_age_threshold:
+#                                 account_age_verified = True
+#                         # We test whether the account is at least one month old by seeing if at least one
+#                         # anime update was done more than a month ago.
+#                         show_amount += 1
+#
+#                         if title in self.titles:
+#                             scores_db_dict[title][user_index] = score
+#                         score_sum += score
+#
+#                 mean_score = round(score_sum / show_amount, 4)
+#
+#                 if 2 <= mean_score <= 9.7:  # First we filter by scores, < 2 and > 9.7 means will just clutter the data
+#                     if not account_age_verified:  # If we couldn't verify through the anime list, we check the
+#                         # user's page directly. We only want to use this as a last resort since unlike the
+#                         # former it takes another API call to do so.
+#                         account_age = check_account_age_directly(username)
+#                         if account_age < account_age_threshold:
+#                             print(f"{username}'s account is {account_age} old, likely a troll")
+#                             return False
+#                         print(f"{username}'s account is {account_age} old, user verified. Adding to database")
+#                     scores_db_dict['Index'][user_index] = current_users
+#                     scores_db_dict['Username'][user_index] = username
+#                     scores_db_dict['Scored Shows'][user_index] = show_amount
+#                     scores_db_dict['Mean Score'][user_index] = mean_score
+#                     new_user_list = list_to_uint8_array([scores_db_dict[key][user_index]
+#                                                          for key in self.titles])
+#                     self.scores_dict[username] = new_user_list
+#                     return True
+#                 else:
+#                     print(f"{username} has no meaningful scores, proceeding to next user")
+#                     return False
+#             print(f"{username} has less than 50 scored shows, proceeding to next user")
+#             return False
+#
+#         def save_data():
+#
+#             print(f"Saving database. Currently on {current_users} entries")
+#             logger.debug(f"Saving database. Currently on {current_users} entries")
+#
+#             # First we create a df from the temporary dictionary. Then we concatenate
+#             # it with the existing database.
+#             nonlocal saved_so_far
+#             temp_df = pl.DataFrame(scores_db_dict, schema=self.schema_dict)
+#             saved_so_far += temp_df.shape[0]
+#
+#             try:
+#                 self._main_df = pl.concat(
+#                     [
+#                         self._main_df,
+#                         temp_df,
+#                     ],
+#                     how="vertical",
+#                 )
+#             except ValueError:
+#                 self._main_df = temp_df
+#
+#             # After we concatenated the main and temp databases, we need to save all the
+#             # necessary files (polars db, user list + blacklist and scores dict)
+#             # to avoid losing data in case the program stops for whatever reason.
+#             self.save_main_df()
+#
+#         save_data_per = 100
+#         saved_so_far = 0
+#         min_scored_amount = 75000
+#         max_scored_amount = 500000
+#
+#         # We want to take usernames from shows that are not TOO popular, but also not too niche.
+#         # The reason for this is that the update table of a niche show will include many troll accounts
+#         # that basically either put everything in their list, or are score-boosting alts with many shows.
+#         # The update table of a very popular show like Attack on Titan on the other hand, will include many
+#         # people that have just started watching anime, and thus only have a few shows in their list + score-boosting
+#         # alts for those shows specifically. Since the program runs for weeks, we want to avoid wasting time
+#         # on filtering those as much as possible.
+#
+#         @timeit
+#         def initialize_temp_scores_dict():
+#             """ We use a dictionary to avoid filling the db inplace, which takes MUCH more time. The data
+#             is saved every save_data_per entries, after which the dictionary is reset to None values to avoid
+#             it getting huge and taking up memory."""
+#             remaining_amount = amount - current_users
+#             for key in self.columns:
+#                 scores_db_dict[key] = [None] * min(save_data_per, remaining_amount)
+#
+#         # ------------------------------ Main function starts here ----------------------------
+#
+#         scores_db_dict = {}
+#         """This dictionary exists as temporary storage for user lists. Instead creating a new polars row
+#         and adding it to the database as we get it, we add it to this dictionary. Then, each
+#         save_data_per entries, we convert that dictionary to a Polars dataframe and concatenate
+#         it with the main one. This results in significant speedup."""
+#
+#         current_users = len(self.MAL_users_list)
+#         initial_users = current_users
+#
+#         rows = self.anime_df.rows()
+#         ids = rows[0][1:]
+#         scored_amount = rows[2][1:]
+#
+#         initialize_temp_scores_dict()
+#
+#         print(f"Starting MAL user length/database size is : {len(self.MAL_users_list)}")
+#         print(f"Starting Blacklist length is : {len(self.blacklist)}")
+#
+#         ids_titles_scored = list(zip(ids, self.titles, scored_amount))
+#         shuffle(ids_titles_scored)  # Shuffle to start getting users from a random show, not the top shows
+#         # We start by iterating over the shows we have in our show DB. Then, for each show, we get 375 usernames.
+#         while True:
+#             for id, title, scored_amount in ids_titles_scored:
+#                 if not scored_amount or int(scored_amount) < min_scored_amount \
+#                                 or int(scored_amount) > max_scored_amount:
+#                     print(f"Scored amount of {title} is {scored_amount}, moving to next show")
+#                     continue
+#                 print(f"Scored amount of {title} is {scored_amount}, proceeding with current show")
+#
+#                 title = replace_characters_for_url(title)
+#                 base_url = f"https://myanimelist.net/anime/{id}/{title}/stats?"
+#                 print(base_url)
+#                 users_table = get_usernames_from_show(base_url)
+#                 # This returns a table of list updates
+#
+#                 for table_row in users_table:
+#                     # The list update table includes usernames, timestamps and more.
+#                     # We extract the usernames from there by their assigned CSS class.
+#                     if current_users == amount:
+#                         break
+#
+#                     user_link = table_row.findNext(
+#                         "div", {"class": "di-tc va-m al pl4"}).findNext("a")
+#                     user_name = str(user_link.string) # This thing is actually a bs4.SoupString,
+#                     # not a regular Python string.
+#
+#                     if user_name not in self.MAL_users_list and user_name not in self.blacklist:
+#
+#                         if user_name.startswith('ishinashi'):
+#                             logger.debug("Retard troll detected, continuing on")
+#                             continue
+#
+#                         user_anime_list = get_user_MAL_list(user_name, full_list=False)
+#                         dict_user_index = current_users - initial_users - saved_so_far
+#                         added = add_user_list_to_db_list(dict_user_index,
+#                                                          user_name, user_anime_list)
+#
+#                         if added:
+#                             current_users += 1
+#                             self.MAL_users_list.append(user_name)
+#                             if (current_users - initial_users) % save_data_per == 0:
+#                                 # We save the database and the lists every n users just to be safe
+#                                 save_data()
+#                                 if current_users == amount:
+#                                     return
+#                                 initialize_temp_scores_dict()
+#                         else:
+#                             self.blacklist.append(user_name)
+#                     else:
+#                         print(f"{user_name} has already been added/blacklisted, moving on to next user")
+#
+#                 if current_users == amount:
+#                     save_data()
+#                     # We reached the necessary amount of users in the database
+#                     return
+#
+#     def main_df_user_indexes(self):
+#         pass
+#
+#
+#     def create_user_entry(self,user_name):
+#         """Creates a user entry for the one we're calculating affinity for + returns a Polars row of their stats.
+#         Currently not in use due to being time-inefficient at adding in real-time. New process maybe?"""
+#         if user_name not in self.MAL_users_list and user_name not in self.blacklist:
+#             user_list = get_user_MAL_list(user_name, full_list=False)
+#             if not user_list:
+#                 print("Unable to access private user list. Please make your list public and try again.")
+#                 terminate_program()
+#         else:
+#             print("User already exists in database")
+#             return
+#
+#         old_titles = [x for x in self.main_df.columns if x not in self.main_db_stats]
+#
+#         anime_indexes = {v: k for (k, v) in enumerate(old_titles)}
+#         # new_list = [None] * len(self.titles)
+#         new_list = [None] * (len(old_titles))
+#
+#         show_amount = 0
+#         score_sum = 0
+#         for anime in user_list:  # anime_list, scores_db
+#             title = anime['node']['title']
+#             score = anime['list_status']['score']
+#             if score == 0:
+#                 break
+#             show_amount += 1
+#             if title in self.titles:
+#                 new_list[anime_indexes[title]] = score
+#             score_sum += score
+#
+#         mean_score = round(score_sum / show_amount, 4)
+#         new_list_for_return = list_to_uint8_array(new_list)  # We save the original list here,
+#         # because later we'll have to add fields that are relevant for adding to DB but not for list comparison.
+#
+#         if 2 <= mean_score <= 9.7:  # Removing troll accounts/people who score everything 10/10
+#             index = self.main_df.shape[0]
+#             new_list = [index,user_name,mean_score,show_amount] + new_list
+#
+#             schema_dict = {'Index' : pl.Int64, 'Username': pl.Utf8, 'Mean Score': pl.Float32, 'Scored Shows': pl.UInt32} | \
+#                           {x: y for (x, y) in zip(old_titles, [pl.UInt8] * len(old_titles))}
+#             # cols = ['Index', 'Username', 'Mean Score', 'Scored Shows'] + self.titles
+#
+#             new_dict = {k : v for k,v in zip(self.main_df.columns, new_list)}
+#
+#             new_row = pl.DataFrame(new_dict,schema=schema_dict)
+#             print(new_row)
+#
+#             # new_row = synchronize_dfs(new_row,self.main_df)
+#             self.main_df = pl.concat(
+#                 [
+#                     self.main_df,
+#                     new_row,
+#                 ],
+#                 how="vertical",
+#             )
+#
+#             self.main_df.write_parquet(user_database_name)
+#             self.MAL_users_list.append(user_name)
+#             save_list_to_csv(self.MAL_users_list,MAL_users_filename)
+#         return new_list_for_return
 
 
 def replace_characters_for_url(s):
@@ -2228,7 +2224,7 @@ def count_scored_shows(user_list):
     return count
 
 
-@timeit
+# @timeit
 def get_user_MAL_list(user_name, full_list=True):
     """Helper function of fill_list_database. Gets the full list of one MAL user via their username.
     If full_list is false, it'll stop once it gets to the shows with no score"""

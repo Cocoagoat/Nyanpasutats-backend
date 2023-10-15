@@ -1,10 +1,10 @@
-from UserDB import UserDB
-from AnimeDB import AnimeDB
-from general_utils import *
+from .UserDB import UserDB
+from .AnimeDB import AnimeDB
+from .general_utils import *
 from igraph import Graph, summary, union
 import networkx as nx
 import matplotlib.pyplot as plt
-from filenames import *
+from .filenames import *
 
 
 class Graphs:

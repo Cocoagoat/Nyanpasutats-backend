@@ -1,8 +1,8 @@
-from filenames import *
-from general_utils import *
-from MAL_utils import *
-from AnimeDB import AnimeDB
-from Graphs import Graphs
+from .filenames import *
+from .general_utils import *
+from .MAL_utils import *
+from .AnimeDB import AnimeDB
+from .Graphs import Graphs
 from sortedcollections import OrderedSet
 
 
@@ -58,6 +58,7 @@ class Tags:
             cls._instance = super().__new__(cls, *args, **kwargs)
             cls._instance._entry_tags_dict = {}
             cls._instance._show_tags_dict = {}
+            cls._instance._entry_tags_dict2 = {}
             cls._instance._tags_per_category = {}
             cls._instance._anime_db = AnimeDB()
             # self._all_anilist_tags = OrderedSet()
@@ -83,9 +84,21 @@ class Tags:
                 self._entry_tags_dict = load_pickled_file(entry_tags_filename)
                 print("Entry-tags dictionary loaded successfully")
             except FileNotFoundError:
-                print("Entry-tags dictionary not found. Creating new shows-tags dictionary")
+                print("Entry-tags dictionary not found. Creating new entry-tags dictionary")
                 self.get_entry_tags()
         return self._entry_tags_dict
+
+    @property
+    def entry_tags_dict2(self):
+        if not self._entry_tags_dict2:
+            try:
+                print("Loading entry-tags alternative dictionary")
+                self._entry_tags_dict2 = load_pickled_file(entry_tags_filename2)
+                print("Alt entry-tags dictionary loaded successfully")
+            except FileNotFoundError:
+                print("Alt entry-tags dictionary not found. Creating new")
+                self.get_entry_tags2()
+        return self._entry_tags_dict2
 
     @property
     def show_tags_dict(self):
@@ -184,7 +197,7 @@ class Tags:
         pass
 
     def get_full_tags_list(self):
-        with open("NSFWTags.txt", 'r') as file:
+        with open(data_path / "NSFWTags.txt", 'r') as file:
             banned_tags = file.read().splitlines()
         tags = OrderedSet()
         for show, show_dict in self.entry_tags_dict.items():
@@ -413,6 +426,25 @@ class Tags:
 
         save_pickled_file(entry_tags_filename, self._entry_tags_dict)
 
+    def get_entry_tags2(self):
+        self._entry_tags_dict2 = {}
+        for entry, entry_data in self.entry_tags_dict.items():
+            self._entry_tags_dict2[entry] = {}
+            entry_tags_list = entry_data['Tags'] + entry_data['DoubleTags']
+            for tag in entry_tags_list:
+                if "<" in tag['name']:
+                    self._entry_tags_dict2[entry][tag['name']] = {'percentage':
+                                                                      tag['percentage']}
+                else:
+                    self._entry_tags_dict2[entry][tag['name']] = {'percentage':
+                                                                      tag['percentage'], 'category': tag['category']}
+            genres_studios = entry_data['Genres']
+            if entry_data['Studio'] in self.all_anilist_tags :
+                genres_studios = genres_studios + [entry_data['Studio']]
+
+            for tag in genres_studios:
+                self._entry_tags_dict2[entry][tag] = {'percentage': 1}
+
     def get_shows_tags(self):
         def calc_length_coeff(entry, stats):
             return round(min(1, stats[entry]["Episodes"] *
@@ -567,7 +599,6 @@ class Tags:
         save_pickled_file(shows_tags_filename, self._show_tags_dict)
         # save_pickled_file(entry_tags_filename, self._entry_tags_dict)
 
-
     def shows_per_tag(self):
         self.shows_per_tag = {tag : [] for tag in self.all_anilist_tags}
         for tag_name in self.all_anilist_tags:
@@ -581,8 +612,6 @@ class Tags:
                     if tag == tag_name:
                         self.shows_per_tag[tag_name].append(entry)
                         break
-
-
 
     def get_shows_tags_pairs(self, entry):
         show_tags = self.show_tags_dict[entry]['Tags']
@@ -644,7 +673,7 @@ class Tags:
 
     @staticmethod
     def get_banned_tags():
-        with open("NSFWTags.txt", 'r') as file:
+        with open(data_path / "NSFWTags.txt", 'r') as file:
             banned_tags = file.read().splitlines()
         return banned_tags
 
