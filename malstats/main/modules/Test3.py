@@ -12,13 +12,14 @@ def train_model_ensemble():
     i = 12
     while True:
         layers = random.choice([3, 4, 5, 6])
-        neuron_start = random.choice([128, 256, 512, 1024, 2048])
+        neuron_start = random.choice([128, 256, 512, 1024])
         neuron_lower = [bool(round(random.randint(0, 1))) for _ in range(5)]
         algo = random.choice(["Adam", "Adagrad", "RMSprop", "SGD"])
-        lr = random.choice([0.005, 0.01, 0.02, 0.03, 0.07, 0.1])
+        lr = random.choice([0.01, 0.02, 0.04, 0.07])
         loss = random.choice(["mean_squared_error", "mean_absolute_error"])
+        # epochs = random.choice([25, 40, 50])
         # with_mean = bool(round(random.randint(0, 1)))
-        model = Model(models_path / f"T4-{i}-50-RSDDP.h5", layers=layers,
+        model = Model(model_filename=models_path / f"T4-{i}-50-RSDDP.h5", layers=layers,
                       neuron_start=neuron_start, neuron_lower=neuron_lower, algo=algo, lr=lr, loss=loss)
         # add regularizer?
         model.train(epochs=50)
@@ -30,11 +31,11 @@ def main():
     freeze_support()
     # aff_db = AffinityDB()
     # aff_db.create_minor_parts((3,10))
-    # train_model_ensemble()
-    neuron_lower = [False, False, True, False, False, True]
+    # neuron_lower = [False, False, True, False, False, True]
     # model = Model(models_path / "T4-12-50-RSDDP.h5", layers=6, neuron_start=512, neuron_lower=neuron_lower, algo="Adam",
     #                lr=0.002,loss="mean_relative_error")
     model = Model()
+    model.train_model_ensemble()
     # model.train(50)
-    model.predict_scores("BaronBrixius")
+    # model.predict_scores("BaronBrixius")
     # print(5)

@@ -23,11 +23,11 @@ def list(request,id):
 
 def get_recommendations(request):
     if request.method == "POST":
-        username = request.POST.get('username')
+        username = request.POST.get('name')
         current_dir = Path(__file__).parent
         # models_path = current_dir.parent / "models"
-        model = Model(current_dir / "models" / "T4-1-50-RSDDP.h5")
-        recommendations = model.predict_scores(username, db_type=1)
+        model = Model(model_filename=current_dir / "models" / "T4-1-50-RSDDP.h5")
+        errors, recommendations = model.predict_scores(username, db_type=1)
         # Get your recommendations using your function (replace 'your_function' with the appropriate name)
         # recommendations = your_function(username)
         # recommendations = "test"

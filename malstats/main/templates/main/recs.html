@@ -1,0 +1,44 @@
+{% extends 'main/base.html' %}
+
+<style>
+    .scrollable-tbody {
+        height: 300px; /* Adjust this value to your desired height */
+        overflow-y: auto;
+        display: block;
+    }
+
+    table {
+        width: 100%;
+    }
+
+    table, th, td {
+        border: 1px solid black;
+    }
+
+    th, td {
+        width: 33%; /* This assumes you have 3 columns, adjust if you add/remove columns */
+    }
+</style>
+
+{% block content %}
+<table>
+    <thead>
+        <tr>
+            <th>Show Name</th>
+            <th>Predicted Score</th>
+            <th>User Score</th>
+            <th>MAL Score</th>
+        </tr>
+    </thead>
+    <tbody class="scrollable-tbody">
+        {% for rec in recommendations %}
+        <tr>
+            <td>{{ rec.ShowName }}</td>
+            <td>{{ rec.PredictedScore }}</td>
+            <td>{{ rec.UserScore }}</td>
+            <td>{{ rec.MALScore }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

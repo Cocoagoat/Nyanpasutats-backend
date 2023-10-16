@@ -22,11 +22,11 @@ from .AffinityDB import AffDBEntryCreator, GeneralData, User, AffinityDB, UserAf
 
 class Model:
 
-    def __init__(self, batch_size=2048,user_name=None, with_mean=False, with_extra_doubles=False,
+    def __init__(self, model_filename=None, batch_size=2048, user_name=None, with_mean=False, with_extra_doubles=False,
                  layers=3, neuron_start=1024, neuron_lower=[False, False, False], algo="Adam", lr=0.002,
                  loss='mean_absolute_error'):
 
-        # self.model_filename = model_filename
+        self.model_filename = model_filename
         self.user_name = user_name
         self.batch_size = batch_size
         self.with_mean = with_mean
@@ -38,6 +38,10 @@ class Model:
         self.algo = algo
         self.lr = lr
         self.loss = loss
+        self.tags = Tags()
+        self.user_db = UserDB()
+        self.aff_db = AffinityDB()
+        self.data = load_pickled_file(data_path / "general_data.pickle")
 
     def repeat_layers(self):
         repeated_layers = []
@@ -92,20 +96,20 @@ class Model:
         return model
 
     def train_model_ensemble(self):
-        i = 12
+        i = 15
         while True:
-            layers = random.choice([3, 4, 5, 6])
-            neuron_start = random.choice([128, 256, 512, 1024, 2048])
-            neuron_lower = [bool(round(random.randint(0, 1))) for _ in range(5)]
-            algo = random.choice(["Adam", "Adagrad", "RMSprop", "SGD"])
-            lr = random.choice([0.005, 0.01, 0.02, 0.03, 0.07, 0.1])
-            loss = random.choice(["mean_squared_error", "mean_absolute_error"])
+            self.layers = random.choice([3, 4, 5, 6])
+            self.neuron_start = random.choice([128, 256, 512, 1024])
+            self.neuron_lower = [bool(round(random.randint(0, 1))) for _ in range(self.layers)]
+            self.algo = random.choice(["Adam", "Adagrad", "RMSprop", "SGD"])
+            self.lr = random.choice([0.01, 0.02, 0.03, 0.07])
+            self.loss = random.choice(["mean_squared_error", "mean_absolute_error"])
+            self.model_filename = models_path / f"T4-{i}-50-RSDDP.h5"
             # with_mean = bool(round(random.randint(0, 1)))
-            model = Model(models_path / f"T4-{i}-50-RSDDP.h5", layers=layers,
-                          neuron_start=neuron_start, neuron_lower=neuron_lower, algo=algo, lr=lr, loss=loss)
+            # model = Model(models_path / f"T4-{i}-50-RSDDP.h5", layers=layers,
+            #               neuron_start=neuron_start, neuron_lower=neuron_lower, algo=algo, lr=lr, loss=loss)
             # add regularizer?
-            model.train(epochs=50)
-
+            self.train(epochs=50)
             i += 1
 
     def train(self, epochs):
@@ -192,139 +196,135 @@ class Model:
             batch_labels = labels.iloc[i: i + self.batch_size]
             yield batch_features, batch_labels
 
-    def predict_scores(self, user_name, db_type=1, shows_to_ignore=None):
-        # def calculate_error(predictions):
-        #     labels = normalized_df.iloc[:, -1].values.reshape(-1, 1)
-        #     labels = list(user_row[names].row(0))
-        #     # predictions = [x[0] for x in predictions]
-        #     rounded_predictions = [round(x) for x in predictions]
-        #     rounded_diffs = [abs(x - y) for (x, y) in list(zip(labels, rounded_predictions)) if x]
-        #     print(labels)
-        #     # diffs = [abs(x - y) for (x, y) in list(zip(labels, predictions))]
-        #     percentage_of_correct = len([x for x in rounded_diffs if not x]) / len(rounded_diffs) * 100
-        #     mean_diffs = [abs(x - user_mean_score) for (x, y) in list(zip(labels, predictions)) if x]
-        #     rounded_mean_diffs = [round(x) for x in mean_diffs]
-        #     mean_percentage_of_correct = len([x for x in rounded_mean_diffs if not x]) / len(rounded_diffs) * 100
-        #     return np.mean(rounded_diffs), np.mean(mean_diffs), np.mean(
-        #         rounded_mean_diffs), percentage_of_correct, mean_percentage_of_correct
-        #
-        # def get_aff_sum(show_name):
-        #     show_tags = tags.show_tags_dict[show_name]['Tags'] + tags.show_tags_dict[show_name]['DoubleTags']
-        #     sum = 0
-        #     tag_count = 0
-        #     for tag in show_tags:
-        #         if tag['name'] not in tags.all_anilist_tags:
-        #             continue
-        #         p = tag['percentage']
-        #         if p == 0:
-        #             break
-        #         # aff = user.tag_affinity_dict[tag['name']]
-        #         pos_aff = user.tag_pos_affinity_dict[tag['name']]
-        #         sum += (pos_aff) * p
-        #         tag_count += 1
-        #     try:
-        #         return sum / tag_count
-        #     except ZeroDivisionError:
-        #         return 0
-        #
-        # def calculate_error2():
-        #     score_diffs = [x[0][1] - x[2] for x in new_predictions if x[2]]
-        #     return np.mean(score_diffs)
+    def test_model(self):
+        shows_to_take = "all"
 
-        def get_user_db(user, shows_to_take):
-            aff_db_entry_creator = AffDBEntryCreator(user, data, tags)
-            aff_db_entry_creator.create_db_entries_from_user_list(shuffle_list=False, shows_to_take=shows_to_take,
-                                                                  db_type=db_type, for_predict=True)
+        with open(data_path / "ModelTests" / "ModelTestUsernames.txt", 'r') as f:
+            test_usernames = f.readlines()
 
-            user_db_entries = aff_db_entry_creator.aff_db_entry_dict
-            # user_mean_score = user_db_entries['Mean Score'][0]
+        for username in test_usernames:
+            user = User(username, scores=user_row.select(self.data.relevant_shows).row(0, named=True),
+                        scored_amount=user_row["Scored Shows"][0])
+            user_row = self.user_db.get_user_db_entry(username)
+            user_shows_df_with_name, normalized_df = self.get_user_db(user, shows_to_take="all",
+                                                                      with_mean=False)
+            i = 1
+            while True:
+                with open(data_path / "ModelTests" / f"ModelTest{i}.txt", "w") as f:
+                    if i == 1:
+                        f.write(username)
+                    self.model_filename = models_path / f"T4-{i}-50-RSDDP.h5"
+                    try:
+                        model = tf.keras.models.load_model(models_path / self.model_filename)
+                    except FileNotFoundError:
+                        break
+                    errors, predictions = self.fetch_predictions(normalized_df, user_shows_df_with_name,
+                                                                 model, user, user_row, shows_to_take)
 
-            user_shows_df_with_name = pd.DataFrame(user_db_entries)
-            # names = user_shows_df_with_name['Show Name'].to_list()
-            user_shows_df = user_shows_df_with_name.drop('Show Name', axis=1)
-            user_shows_df = user_shows_df.fillna(0)
-            normalized_df = aff_db.normalize_aff_df(user_shows_df, for_predict=True)
-            normalized_df = normalized_df.fillna(0)
+                    f.write(f"Model {i}")
+                    f.write("Errors : ", errors)
+                    f.write(errors)
 
-            if not with_mean:
-                normalized_df = normalized_df.drop('Show Score', axis=1)
-                cols_to_take = [x for x in normalized_df.columns if not x.startswith("Doubles-")
-                                and x != 'Show Score' and x != 'Show Popularity']
-                # cols_to_take = [x for x in normalized_df.columns if x!= 'Show Score']
-                normalized_df = normalized_df[cols_to_take]
+                    i += 1
 
-            return user_shows_df_with_name, normalized_df
+    def get_user_db(self, user, shows_to_take, with_mean=False):
+        # data = GeneralData()
+        # tags = Tags()
+        # aff_db = AffinityDB()
+        aff_db_entry_creator = AffDBEntryCreator(user, self.data, self.tags)
+        aff_db_entry_creator.create_db_entries_from_user_list(shuffle_list=False, shows_to_take=shows_to_take,
+                                                              db_type=1, for_predict=True)
 
-        def get_predictions(normalized_df, user_shows_df_with_name, model, user, shows_to_take):
-            if shows_to_take != "watched":
-                features = normalized_df.values
-            else:
-                features = normalized_df.iloc[:, :-1].values
+        user_db_entries = aff_db_entry_creator.aff_db_entry_dict
+        # user_mean_score = user_db_entries['Mean Score'][0]
 
-            predictions = model.predict(features)
-            predictions = [x[0] for x in predictions]
-            rounded_predictions = [round(x, 1) for x in predictions]
-            names = user_shows_df_with_name['Show Name'].to_list()
-            sorted_predictions_dict = {x[0]: x[1] for x in
-                                       sorted(list(zip(names, rounded_predictions)), key=lambda x: x[1])}
+        user_shows_df_with_name = pd.DataFrame(user_db_entries)
+        # names = user_shows_df_with_name['Show Name'].to_list()
+        user_shows_df = user_shows_df_with_name.drop('Show Name', axis=1)
+        user_shows_df = user_shows_df.fillna(0)
+        normalized_df = self.aff_db.normalize_aff_df(user_shows_df, for_predict=True)
+        normalized_df = normalized_df.fillna(0)
 
+        if not with_mean:
+            normalized_df = normalized_df.drop('Show Score', axis=1)
+            cols_to_take = [x for x in normalized_df.columns if not x.startswith("Doubles-")
+                            and x != 'Show Score' and x != 'Show Popularity']
+            # cols_to_take = [x for x in normalized_df.columns if x!= 'Show Score']
+            normalized_df = normalized_df[cols_to_take]
+
+        return user_shows_df_with_name, normalized_df
+
+    def fetch_predictions(self, normalized_df, user_shows_df_with_name, model, user, user_row, shows_to_take):
+        if shows_to_take != "watched":
+            features = normalized_df.values
+        else:
+            features = normalized_df.iloc[:, :-1].values
+
+        predictions = model.predict(features)
+        predictions = [x[0] for x in predictions]
+        rounded_predictions = [round(x, 1) for x in predictions]
+        names = user_shows_df_with_name['Show Name'].to_list()
+        sorted_predictions_dict = {x[0]: x[1] for x in
+                                   sorted(list(zip(names, rounded_predictions)), key=lambda x: x[1])}
+
+        new_predictions_dict = {}
+        max_pos_affs_per_show = {}
+        max_pos_affs = {
+            user_shows_df_with_name['Show Name'][i]: (user_shows_df_with_name['Single Max Pos Affinity'][i]
+                                                      + user_shows_df_with_name['Double Max Pos Affinity'][i])
+            for i in range(len(user_shows_df_with_name))}
+        processed_entries = []
+        for entry in user.entry_list:  # change this to go in diff order
+            if entry in processed_entries:
+                continue
+            main_show = self.tags.entry_tags_dict[entry]['Main']
+            try:
+                max_score = sorted_predictions_dict[main_show]
+                max_pos_aff = max_pos_affs[main_show]
+            except KeyError:
+                continue
+            for entry, length_coeff in self.tags.show_tags_dict[main_show]['Related'].items():
+                if length_coeff == 1 and entry in user.entry_list and sorted_predictions_dict[entry] > max_score:
+                    max_score = sorted_predictions_dict[entry]
+                    max_pos_aff = max_pos_affs[entry]
+                processed_entries.append(entry)
+            new_predictions_dict[main_show] = max_score
+            max_pos_affs_per_show[main_show] = round(max_pos_aff, 3)
+
+        # mean_scores_of_new_predictions = data.mean_score_per_show.select(new_predictions_dict.keys()).to_numpy().tolist()[0]
+        mean_scores_of_new_predictions = [self.tags.get_max_score_of_show(show, self.data.mean_score_per_show)
+                                          for show in new_predictions_dict.keys()]
+
+        user_entry_list_row = user_row.select(user.entry_list)
+        user_scores_of_new_predictions = [self.tags.get_max_score_of_show(show, user_entry_list_row)
+                                          for show in new_predictions_dict.keys()]
+
+        new_predictions = sorted(list(zip(new_predictions_dict.items(), mean_scores_of_new_predictions,
+                                          user_scores_of_new_predictions, max_pos_affs_per_show.values())),
+                                 reverse=True, key=lambda x: (x[0][1], x[3]))
+
+        new_predictions_list = []
+        for pred in new_predictions:
             new_predictions_dict = {}
-            max_pos_affs_per_show = {}
-            max_pos_affs = {
-                user_shows_df_with_name['Show Name'][i]: (user_shows_df_with_name['Single Max Pos Affinity'][i]
-                                                          + user_shows_df_with_name['Double Max Pos Affinity'][i])
-                for i in range(len(user_shows_df_with_name))}
-            processed_entries = []
-            for entry in user.entry_list:  # change this to go in diff order
-                if entry in processed_entries:
-                    continue
-                main_show = tags.entry_tags_dict[entry]['Main']
-                try:
-                    max_score = sorted_predictions_dict[main_show]
-                    max_pos_aff = max_pos_affs[main_show]
-                except KeyError:
-                    continue
-                for entry, length_coeff in tags.show_tags_dict[main_show]['Related'].items():
-                    if length_coeff == 1 and entry in user.entry_list and sorted_predictions_dict[entry] > max_score:
-                        max_score = sorted_predictions_dict[entry]
-                        max_pos_aff = max_pos_affs[entry]
-                    processed_entries.append(entry)
-                new_predictions_dict[main_show] = max_score
-                max_pos_affs_per_show[main_show] = round(max_pos_aff, 3)
+            new_predictions_dict['ShowName'] = pred[0][0]
+            new_predictions_dict['PredictedScore'] = pred[0][1]
+            new_predictions_dict['UserScore'] = pred[2]
+            new_predictions_dict['MALScore'] = pred[1]
+            new_predictions_list.append(new_predictions_dict)
 
-            # mean_scores_of_new_predictions = data.mean_score_per_show.select(new_predictions_dict.keys()).to_numpy().tolist()[0]
-            mean_scores_of_new_predictions = [tags.get_max_score_of_show(show, data.mean_score_per_show)
-                                              for show in new_predictions_dict.keys()]
+        new_predictions_list = sorted(new_predictions_list, key=lambda x: x['PredictedScore'], reverse=True)
+        new_predictions_list_no_watched = [x for x in new_predictions_list if not x['UserScore']]
+        return new_predictions_list, new_predictions_list_no_watched
 
-            user_entry_list_row = user_row.select(user.entry_list)
-            user_scores_of_new_predictions = [tags.get_max_score_of_show(show, user_entry_list_row)
-                                              for show in new_predictions_dict.keys()]
-
-            new_predictions = sorted(list(zip(new_predictions_dict.items(), mean_scores_of_new_predictions,
-                                              user_scores_of_new_predictions, max_pos_affs_per_show.values())),
-                                     reverse=True, key=lambda x: (x[0][1], x[3]))
-
-            new_predictions_list = []
-            for pred in new_predictions:
-                new_predictions_dict = {}
-                new_predictions_dict['Show Name'] = pred[0][0]
-                new_predictions_dict['Predicted Score'] = pred[0][1]
-                new_predictions_dict['User Score'] = pred[2]
-                new_predictions_dict['MAL Score'] = pred[1]
-                new_predictions_list.append(new_predictions_dict)
-
-            new_predictions_list = sorted(new_predictions_list, key=lambda x: x['Predicted Score'], reverse=True)
-            new_predictions_list_no_watched = [x for x in new_predictions_list if not x['User Score']]
-            return new_predictions_list, new_predictions_list_no_watched
-
+    def predict_scores(self, user_name, db_type=1):
         def calculate_error(prediction_list):
             errors = np.zeros(10)
             error_counts = np.zeros(10)
             for pred_dict in prediction_list:
-                if pred_dict['User Score']:
-                    error_counts[pred_dict['User Score'] - 1] += 1
-                    if pred_dict['User Score'] > pred_dict['Predicted Score']:
-                        errors[pred_dict['User Score'] - 1] += abs(pred_dict['User Score'] - pred_dict['Predicted Score'])
+                if pred_dict['UserScore']:
+                    error_counts[pred_dict['UserScore'] - 1] += 1
+                    if pred_dict['UserScore'] > pred_dict['PredictedScore']:
+                        errors[pred_dict['UserScore'] - 1] += abs(pred_dict['UserScore'] - pred_dict['PredictedScore'])
 
             for i in range(10):
                 try:
@@ -334,24 +334,21 @@ class Model:
 
             return errors
 
-
         with_mean = False
-        tags = Tags()
-        data = load_pickled_file(data_path / "general_data.pickle")
-        user_db = UserDB()
-        aff_db = AffinityDB()
         shows_to_take = "all"
 
-        user_row = user_db.get_user_db_entry(user_name)
-        relevant_shows = list(tags.entry_tags_dict.keys())
-        user = User(user_name, scores=user_row.select(relevant_shows).row(0, named=True),
+        user_row = self.user_db.get_user_db_entry(user_name)
+        user = User(user_name, scores=user_row.select(self.data.relevant_shows).row(0, named=True),
                     scored_amount=user_row["Scored Shows"][0])
-        user_shows_df_with_name, normalized_df = get_user_db(user, shows_to_take)
-        model = tf.keras.models.load_model(models_path / "T4-7-50-RSDDP.h5")
-        predictions, predictions_no_watched = get_predictions(normalized_df,user_shows_df_with_name, model, user, shows_to_take)
+        user_shows_df_with_name, normalized_df = self.get_user_db(user, shows_to_take, with_mean)
+
+        model = tf.keras.models.load_model(models_path / self.model_filename)
+        predictions, predictions_no_watched = self.fetch_predictions(normalized_df,
+                                                                     user_shows_df_with_name,
+                                                                     model, user, user_row, shows_to_take)
         errors = calculate_error(predictions)
         print(5)
-        return predictions
+        return errors, predictions
         # user_row = user_db.get_user_db_entry(user_name)
         # relevant_shows = list(tags.entry_tags_dict.keys())
         # user = User(user_name, scores=user_row.select(relevant_shows).row(0, named=True),

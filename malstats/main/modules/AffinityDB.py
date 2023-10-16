@@ -6,7 +6,7 @@ from .AnimeDB import AnimeDB
 from .UserDB import UserDB
 from .Tags import Tags
 from .User import User
-from .GeneralData import GeneralData
+from .GeneralData import GeneralData as GeneralData
 from .UserAffinityCalculator import UserAffinityCalculator
 from .filenames import *
 from .MAL_utils import *
@@ -1036,7 +1036,6 @@ class AffinityDB:
 
                 aff_db_dict = AffDBEntryCreator.initialize_aff_db_dict(db_type=1)
 
-
     @staticmethod
     def combine(max_examples_per_df=1_500_000):
         """Takes the small chunks created by create_affinity_DB and turns them into larger
@@ -1150,7 +1149,7 @@ class AffinityDB:
             # If we're normalizing the database made from a user's list, we must use the main database's
             # mean and standard deviation, as they will be different from the mini-affinity database
             # created from the user's list.
-            if type(self.data) != GeneralData:
+            if not self.data:
                 raise ValueError("Data must be sent to acquire mean of main affinity database"
                                  "if for_predict=True")
             for col in cols_for_norm:
