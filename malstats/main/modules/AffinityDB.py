@@ -391,7 +391,7 @@ class AffDBEntryCreator:
             self.user.adj_tag_affinity_dict = self.user.tag_affinity_dict.copy()
             self.user.adj_pos_tag_affinity_dict = self.user.tag_pos_affinity_dict.copy()
 
-            self.user_affinity_calculator.recalc_affinities_2(main_entry)
+            # self.user_affinity_calculator.recalc_affinities_2(main_entry)
             for entry, length_coeff in self.tags.show_tags_dict[main_entry]['Related'].items():
 
                 # if entry in processed_entries: # try dict instead?
@@ -428,7 +428,7 @@ class AffDBEntryCreator:
                         self.aff_db_entry_dict['Score Difference'].append(self.data.mean_score_per_show[entry].item() - \
                                                                        self.data.mean_score_per_show[main_entry].item())
                     except ColumnNotFoundError:
-                        continue # A unique case of a sequel that meets the conditions of partial_anime_df +
+                        continue  # A unique case of a sequel that meets the conditions of partial_anime_df +
                         # a main show that doesn't. We don't want to count this.
                     self.aff_db_entry_dict['Sequel'].append(1)
 
@@ -1184,10 +1184,15 @@ class AffinityDB:
             #     for stat in ["Max Affinity", "Min Affinity", "Avg Affinity", "Max Pos Affinity"]:
             #         df.drop(f"Doubles-{j} {stat}", inplace=True, axis=1)
             cols_to_take = [x for x in df.columns if not x.startswith("Doubles-")
-                            and x != 'Show Score' and x != 'Show Popularity']
+                            and x != 'Show Score' and x != 'Show Popularity' and 'Tag Count' not in x]
+            cols_to_take = [x for x in df.columns if x.startswith("Single") or (x.startswith('Double')
+                                                                                and not x.startswith('Doubles-'))
+                            or x in ['Mean Score', 'Standard Deviation', 'Recommended Shows Affinity', 'Sequel',
+                                     'Length Coeff', 'Score Difference', 'User Scored Shows', 'User Score']
+                            or "Genres" in x or "Studio" in x]
             # cols_to_take = [x for x in df.columns if not x=='Show Score']
             df = df[cols_to_take]
-            df.to_parquet(aff_db_path / f"{aff_db_filename}-P{i + 1}-N-RSDDP.parquet")
+            df.to_parquet(aff_db_path / f"{aff_db_filename}-P{i + 1}-N-RSDDPCA.parquet")
             pbar.update(1)
 
     @staticmethod

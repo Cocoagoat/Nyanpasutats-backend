@@ -2,43 +2,49 @@
 
 <style>
     .scrollable-tbody {
-        height: 300px; /* Adjust this value to your desired height */
-        overflow-y: auto;
-        display: block;
+    display: block;
+    max-height: 300px; /* Adjust this value as needed */
+    overflow-y: auto;
     }
 
     table {
+        display: block;
         width: 100%;
     }
 
-    table, th, td {
-        border: 1px solid black;
+    table thead {
+        display: table;
+        width: 100%;
     }
 
-    th, td {
-        width: 33%; /* This assumes you have 3 columns, adjust if you add/remove columns */
+    table tbody tr {
+        display: table;
+        width: 100%;
+        table-layout: fixed;
     }
 </style>
 
 {% block content %}
-<table>
-    <thead>
-        <tr>
-            <th>Show Name</th>
-            <th>Predicted Score</th>
-            <th>User Score</th>
-            <th>MAL Score</th>
-        </tr>
-    </thead>
-    <tbody class="scrollable-tbody">
-        {% for rec in recommendations %}
-        <tr>
-            <td>{{ rec.ShowName }}</td>
-            <td>{{ rec.PredictedScore }}</td>
-            <td>{{ rec.UserScore }}</td>
-            <td>{{ rec.MALScore }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+    <div class="text-center">
+        <table class="table table-bordered table-hover table-striped mx-auto">
+            <thead>
+                <tr>
+                    <th>Show Name</th>
+                    <th>Predicted Score</th>
+                    <th>User Score</th>
+                    <th>MAL Score</th>
+                </tr>
+            </thead>
+            <tbody class="scrollable-tbody">
+                {% for rec in recommendations %}
+                <tr>
+                    <td>{{ rec.ShowName }}</td>
+                    <td>{{ rec.PredictedScore }}</td>
+                    <td>{{ rec.UserScore }}</td>
+                    <td>{{ rec.MALScore }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 {% endblock %}

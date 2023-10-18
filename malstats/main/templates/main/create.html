@@ -3,7 +3,7 @@
 {% block title %} Create New List {% endblock %}
 
 {% block content %}
-Create Page
+<p class="text-center">Get Recommendations</p>
 <form method="post" action="/recs/">
     {% csrf_token %}
     {{form.as_p}}

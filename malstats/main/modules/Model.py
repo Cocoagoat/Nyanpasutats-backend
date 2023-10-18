@@ -11,6 +11,7 @@ from keras.models import Sequential
 from keras.layers import Dense
 import matplotlib.pyplot as plt
 import os
+import re
 import time
 import numpy as np
 import tensorflow as tf
@@ -136,8 +137,8 @@ class Model:
         if not self.with_mean:
             # num_features = 98
             # num_features -= 1
-            num_features = 97
-            if not os.path.exists(aff_db_path / f"{aff_db_filename}-P1-N-RSDDP.parquet"):
+            num_features = 95
+            if not os.path.exists(aff_db_path / f"{aff_db_filename}-P1-N-RSDDPC.parquet"):
                 AffinityDB.remove_show_score()
         # if not self.with_extra_doubles:
         #     num_features -= 120
@@ -156,7 +157,7 @@ class Model:
 
         file_amount = AffinityDB.count_major_parts()
         if not self.with_mean:
-            file_paths = [str(aff_db_path / f"{aff_db_filename}-P{_}-N-RSDDP.parquet") for _ in range(file_amount)]
+            file_paths = [str(aff_db_path / f"{aff_db_filename}-P{_}-N-RSDDPC.parquet") for _ in range(file_amount)]
         else:
             file_paths = [str(aff_db_path / f"{aff_db_filename}-P{_}-N-RS.parquet") for _ in range(file_amount)]
 
@@ -196,36 +197,64 @@ class Model:
             batch_labels = labels.iloc[i: i + self.batch_size]
             yield batch_features, batch_labels
 
-    def test_model(self):
+    def test_models(self):
+        def adjust_predictions(preds):
+            for p in preds:
+                p['ScoreDiff'] = p['PredictedScore'] - p['MALScore']
+            preds = sorted(preds, reverse=True, key = lambda x: x['ScoreDiff'])
+            return preds
+
         shows_to_take = "all"
 
         with open(data_path / "ModelTests" / "ModelTestUsernames.txt", 'r') as f:
             test_usernames = f.readlines()
 
+        i = 1
+        while True:
+            with open(data_path / "ModelTests" / f"ModelTest{i}-D.txt", "w") as f:
+                self.model_filename = models_path / f"T4-{i}-50-RSDDP.h5"
+                try:
+                    model = tf.keras.models.load_model(models_path / self.model_filename)
+                except (OSError, FileNotFoundError):
+                    break
+                f.write(f"Optimizer : {model.optimizer._name}\n")
+                f.write("Layers :\n")
+                for layer in model.layers:
+                    try:
+                        f.write(f"{str(layer.units)}\n")
+                    except AttributeError:
+                        continue
+            i += 1
+
+        test_usernames = [username.strip() for username in test_usernames]
         for username in test_usernames:
+            user_row = self.user_db.get_user_db_entry(username)
             user = User(username, scores=user_row.select(self.data.relevant_shows).row(0, named=True),
                         scored_amount=user_row["Scored Shows"][0])
-            user_row = self.user_db.get_user_db_entry(username)
             user_shows_df_with_name, normalized_df = self.get_user_db(user, shows_to_take="all",
                                                                       with_mean=False)
             i = 1
             while True:
-                with open(data_path / "ModelTests" / f"ModelTest{i}.txt", "w") as f:
-                    if i == 1:
-                        f.write(username)
+                with open(data_path / "ModelTests" / f"ModelTest{i}-D.txt", "a", encoding='utf-8') as f:
                     self.model_filename = models_path / f"T4-{i}-50-RSDDP.h5"
                     try:
                         model = tf.keras.models.load_model(models_path / self.model_filename)
-                    except FileNotFoundError:
+                    except (OSError, FileNotFoundError):
                         break
-                    errors, predictions = self.fetch_predictions(normalized_df, user_shows_df_with_name,
+                    predictions, predictions_no_watched = self.fetch_predictions(normalized_df, user_shows_df_with_name,
                                                                  model, user, user_row, shows_to_take)
+                    errors = self.calculate_error(predictions)
+                    f.write(f"{username}\n")
+                    # f.write(f"Model {i}")
+                    f.write(f"Errors : \n{errors}\n")
+                    # f.write(errors)
+                    # f.write("Predictions: ", predictions)
+                    f.write("Predictions\n")
+                    predictions = adjust_predictions(predictions)
+                    for prediction in predictions[0:50]:
+                        f.write(f"{prediction}\n")
 
-                    f.write(f"Model {i}")
-                    f.write("Errors : ", errors)
-                    f.write(errors)
-
-                    i += 1
+                i += 1
 
     def get_user_db(self, user, shows_to_take, with_mean=False):
         # data = GeneralData()
@@ -247,8 +276,8 @@ class Model:
 
         if not with_mean:
             normalized_df = normalized_df.drop('Show Score', axis=1)
-            cols_to_take = [x for x in normalized_df.columns if not x.startswith("Doubles-")
-                            and x != 'Show Score' and x != 'Show Popularity']
+            cols_to_take = [x for x in normalized_df.columns if not x.startswith("Doubles-") #re.match(r'^Doubles-\d+$', x)
+                            and x != 'Show Score' and x != 'Show Popularity'] #and 'Tag Count' not in x]
             # cols_to_take = [x for x in normalized_df.columns if x!= 'Show Score']
             normalized_df = normalized_df[cols_to_take]
 
@@ -316,23 +345,25 @@ class Model:
         new_predictions_list_no_watched = [x for x in new_predictions_list if not x['UserScore']]
         return new_predictions_list, new_predictions_list_no_watched
 
+    @staticmethod
+    def calculate_error(prediction_list):
+        errors = np.zeros(10)
+        error_counts = np.zeros(10)
+        for pred_dict in prediction_list:
+            if pred_dict['UserScore']:
+                error_counts[pred_dict['UserScore'] - 1] += 1
+                if pred_dict['UserScore'] > pred_dict['PredictedScore']:
+                    errors[pred_dict['UserScore'] - 1] += abs(pred_dict['UserScore'] - pred_dict['PredictedScore'])
+
+        for i in range(10):
+            try:
+                errors[i] /= error_counts[i]
+            except ZeroDivisionError:
+                errors[i] = 0
+        return errors
+
     def predict_scores(self, user_name, db_type=1):
-        def calculate_error(prediction_list):
-            errors = np.zeros(10)
-            error_counts = np.zeros(10)
-            for pred_dict in prediction_list:
-                if pred_dict['UserScore']:
-                    error_counts[pred_dict['UserScore'] - 1] += 1
-                    if pred_dict['UserScore'] > pred_dict['PredictedScore']:
-                        errors[pred_dict['UserScore'] - 1] += abs(pred_dict['UserScore'] - pred_dict['PredictedScore'])
 
-            for i in range(10):
-                try:
-                    errors[i] /= error_counts[i]
-                except ZeroDivisionError:
-                    errors[i] = 0
-
-            return errors
 
         with_mean = False
         shows_to_take = "all"
@@ -340,13 +371,15 @@ class Model:
         user_row = self.user_db.get_user_db_entry(user_name)
         user = User(user_name, scores=user_row.select(self.data.relevant_shows).row(0, named=True),
                     scored_amount=user_row["Scored Shows"][0])
+
         user_shows_df_with_name, normalized_df = self.get_user_db(user, shows_to_take, with_mean)
 
         model = tf.keras.models.load_model(models_path / self.model_filename)
         predictions, predictions_no_watched = self.fetch_predictions(normalized_df,
                                                                      user_shows_df_with_name,
                                                                      model, user, user_row, shows_to_take)
-        errors = calculate_error(predictions)
+        errors = self.calculate_error(predictions)
+        errors = [error if not np.isnan(error) else 0 for error in errors]
         print(5)
         return errors, predictions
         # user_row = user_db.get_user_db_entry(user_name)

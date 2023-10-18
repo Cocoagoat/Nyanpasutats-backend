@@ -158,7 +158,7 @@ class UserAffinityCalculator:
 
         for entry in self.user.entry_list:
             user_score = self.user.scores[entry]
-            if not user_score or entry in processed_entries:
+            if not user_score or entry in processed_entries or entry.startswith('K-On!'):
                 continue
 
             main_show = self.tags.entry_tags_dict[entry]['Main']
