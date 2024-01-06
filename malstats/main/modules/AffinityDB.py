@@ -11,6 +11,7 @@ from .UserAffinityCalculator import UserAffinityCalculator
 from .filenames import *
 from .MAL_utils import *
 from .Graphs import Graphs
+from .GlobalValues import cpu_share
 from concurrent.futures import ProcessPoolExecutor
 from memory_profiler import profile
 import shutil
@@ -182,6 +183,7 @@ class AffDBEntryCreator:
         self.tags = tags
         self.user_affinity_calculator = UserAffinityCalculator(self.user, self.data, self.tags)
         self.aff_db_entry_dict = None
+        self.graphs = Graphs()
 
     @classmethod
     def initialize_aff_db_dict(cls, db_type=1, for_predict=False):
@@ -240,8 +242,18 @@ class AffDBEntryCreator:
 
         return aff_tag_weight, pos_aff_tag_weight
 
-    def get_affinity_stats(self, entry, category, category_tag_list, entry_tags_dict, entry_genres_list, #entry_tag_list, entry_tag_percentages
-                             overall_temp_dict):
+    def get_affinity_stats(self, entry, category, category_tag_list, overall_temp_dict):
+        """
+
+        :param entry: remove
+        :param category: Name of the tag category to be processed.
+        :param category_tag_list: List of tags under the category.
+        :param entry_tags_dict:
+        :param entry_genres_list: remove
+        :param overall_temp_dict: Dictionary that holds the current max/min value for each max/min/avg category.
+        :return: None (simply updates
+        """
+
         def update_stats(stats_dict, tag_weight, aff_tag_weight, pos_aff_tag_weight, tag_type):
 
             if aff_tag_weight > 0:
@@ -266,20 +278,22 @@ class AffDBEntryCreator:
 
          # Give this tag_type if it's only related to overall_dict
 
-        try:
-            tag_name = category_tag_list[0]
-        except IndexError:
-            tag_name = None
-
-        tag_type = "Single" if tag_name and "<" not in tag_name else "Double" # All tags in a category = same type
-        cat_suffix = category.split("-")[-1]
+        # try:
+        #     # This part is just to find out whether it's single or double ahead of time
+        #     tag_name = category_tag_list[0]
+        # except IndexError:
+        #     tag_name = None
+        tag_type = self.tags.get_category_tag_type(category)
+        # tag_type = "Single" if tag_name and "<" not in tag_name else "Double"  # All tags in a category = same type
+        cat_suffix = category.split("-")[-1] # will become unnecessary if trimming down double cats to one, remove?
         # There won't be any doubles with <Cute Girls Doing Cute Things>x<?> if the show isn't a CGDCT
-
+        entry_tags_dict = self.tags.entry_tags_dict2[entry]
         temp_dict = self.initialize_temp_dict()
-        if category == 'Genres' or category == 'Studio':
-            for tag_name in category_tag_list:
-                entry_tags_dict[tag_name] = {}
-                entry_tags_dict[tag_name]['percentage'] = 1
+
+        # if category == 'Genres' or category == 'Studio':
+        #     for tag_name in category_tag_list:
+        #         entry_tags_dict[tag_name] = {}
+        #         entry_tags_dict[tag_name]['percentage'] = 1
 
         for tag_name in category_tag_list:
             try:
@@ -291,7 +305,7 @@ class AffDBEntryCreator:
             except KeyError:
                 continue
             if not aff_tag_weight:
-                continue
+                continue  # No point updating if the user has 0 affinity to that tag
             update_stats(temp_dict, entry_tags_dict[tag_name]['percentage'],
                          aff_tag_weight, pos_aff_tag_weight, tag_type)
 
@@ -305,7 +319,7 @@ class AffDBEntryCreator:
             temp_dict[f"{tag_type} Avg Pos Affinity"] = 0
 
         if category != 'Studio':
-            for stat in self.features.category_features: #max, min, avg, maxpos
+            for stat in self.features.category_features:  # "single/double max/min/avg/maxpos affinity"
                 if tag_type not in stat:
                     continue
                 if temp_dict[stat] is None:
@@ -321,22 +335,23 @@ class AffDBEntryCreator:
             self.aff_db_entry_dict["Studio Affinity"].append(0)
             self.aff_db_entry_dict["Studio Pos Affinity"].append(0)
 
-        if not (tag_type == 'Double' and cat_suffix.isnumeric()):
-            for key in temp_dict.keys():
-                if not temp_dict[key]:
-                    continue
-                stat_name = " ".join(key.split()[1:])
-                if stat_name.startswith("Avg"):
-                    # If key doesn't start with min or max, it's a counter (avg or neg/pos)
-                    overall_temp_dict[key] += temp_dict[key]*tag_count #Make the single/double distinction here?
-                elif stat_name.startswith("Min"):
-                    if overall_temp_dict[key] is None or temp_dict[key] < overall_temp_dict[key]:
-                        overall_temp_dict[key] = temp_dict[key]
-                elif stat_name.startswith("Max"): # It's one of the "max" values
-                    if overall_temp_dict[key] is None or temp_dict[key] > overall_temp_dict[key]:
-                        overall_temp_dict[key] = temp_dict[key]
-                else: # It's the pos/neg tag ratios
-                    overall_temp_dict[key] += temp_dict[key]
+        # if not (tag_type == 'Double' and cat_suffix.isnumeric()):
+        for key in temp_dict.keys():
+            if not temp_dict[key]:
+                continue
+            stat_name = " ".join(key.split()[1:])
+            if stat_name.startswith("Avg"):
+                # If key doesn't start with min or max, it's a counter (avg or neg/pos)
+                overall_temp_dict[key] += temp_dict[key]*tag_count
+                # Multiplying by tag count because later we divide by the sum of the tag counts to get the true avg
+            elif stat_name.startswith("Min"):
+                if overall_temp_dict[key] is None or temp_dict[key] < overall_temp_dict[key]:
+                    overall_temp_dict[key] = temp_dict[key]
+            elif stat_name.startswith("Max"):  # It's one of the "max" values
+                if overall_temp_dict[key] is None or temp_dict[key] > overall_temp_dict[key]:
+                    overall_temp_dict[key] = temp_dict[key]
+            else:  # It's the pos/neg tag ratios
+                overall_temp_dict[key] += temp_dict[key]
 
     @staticmethod
     def initialize_temp_dict():
@@ -348,12 +363,20 @@ class AffDBEntryCreator:
                      for stat, stat_value in temp_dict.items()}  # Quick way to create stats for each tag type
         return temp_dict
 
-    def create_db_entries_from_user_list(self, shuffle_list=True, for_predict=False, shows_to_take="watched", db_type=1,
+    def create_db_entries_from_user_list(self, shuffle_list=False, for_predict=False, shows_to_take="watched", db_type=1,
                                          sample_size=0):
         def get_user_entry_list(shows_to_take):
             if shows_to_take == "watched":
                 # This will always be used for calculating affinities to create the affinity database.
                 self.user.entry_list = [key for key, value in self.user.scores.items() if value]
+            elif shows_to_take == "watched+related":
+
+                temp_list = []
+                self.user.entry_list = [key for key, value in self.user.scores.items() if value]
+                for entry in self.user.entry_list:
+                    root, related_shows = self.graphs.find_related_entries(entry)
+                    temp_list += related_shows
+                self.user.entry_list = list(set(self.user.entry_list + temp_list))
             elif shows_to_take == "unwatched":
                 # For predicting scores of shows the user hasn't watched yet.
                 del self.aff_db_entry_dict['User Score']
@@ -386,12 +409,16 @@ class AffDBEntryCreator:
 
             if entry in processed_entries:
                 continue
-            main_entry = self.tags.entry_tags_dict[entry]['Main']
+            try:
+                main_entry = self.tags.entry_tags_dict[entry]['Main']
+            except KeyError:
+                continue
             main_show_data = self.tags.show_tags_dict[self.tags.entry_tags_dict[entry]['Main']]
             self.user.adj_tag_affinity_dict = self.user.tag_affinity_dict.copy()
             self.user.adj_pos_tag_affinity_dict = self.user.tag_pos_affinity_dict.copy()
 
-            # self.user_affinity_calculator.recalc_affinities_2(main_entry)
+            self.user_affinity_calculator.recalc_affinities_2(main_entry)
+
             for entry, length_coeff in self.tags.show_tags_dict[main_entry]['Related'].items():
 
                 # if entry in processed_entries: # try dict instead?
@@ -425,11 +452,12 @@ class AffDBEntryCreator:
                     self.aff_db_entry_dict['Score Difference'].append(0)
                 else:
                     try:
-                        self.aff_db_entry_dict['Score Difference'].append(self.data.mean_score_per_show[entry].item() - \
-                                                                       self.data.mean_score_per_show[main_entry].item())
+                        self.aff_db_entry_dict['Score Difference'].append(self.data.mean_score_per_show[entry] - \
+                                                                       self.data.mean_score_per_show[main_entry])
                     except ColumnNotFoundError:
                         continue  # A unique case of a sequel that meets the conditions of partial_anime_df +
-                        # a main show that doesn't. We don't want to count this.
+                        # a main show that doesn't (for example sequel rated 6.8 but main show rated 6.1).
+                        # We don't want to count this.
                     self.aff_db_entry_dict['Sequel'].append(1)
 
                 self.get_recommended_show_aff(entry)
@@ -439,19 +467,21 @@ class AffDBEntryCreator:
 
                 if db_type == 1:
                     overall_temp_dict = self.initialize_temp_dict()
-                    processed_tags = []
+                    # processed_tags = []
 
                     for category, category_tags in self.tags.tags_per_category.items():
-                        entry_tags_dict = self.tags.entry_tags_dict2[entry] # move dis up
+                        # entry_tags_dict = self.tags.entry_tags_dict2[entry] # move dis up
                         self.get_affinity_stats(entry, category, category_tags,
-                                                entry_tags_dict,entry_genres_list, overall_temp_dict)
-                        processed_tags = processed_tags + category_tags
+                                                overall_temp_dict)
+                        # processed_tags = processed_tags + category_tags
 
                     category = "Genres"
-                    self.get_affinity_stats(entry, category, entry_genres_list, {}, [], overall_temp_dict)
+                    self.get_affinity_stats(entry, category, category_tag_list=entry_genres_list,
+                                            overall_temp_dict=overall_temp_dict)
 
                     category = "Studio"
-                    self.get_affinity_stats(entry, category, [entry_studio], {}, [], overall_temp_dict)
+                    self.get_affinity_stats(entry, category, category_tag_list=[entry_studio],
+                                            overall_temp_dict=overall_temp_dict)
 
                     for tag_type in Tags().tag_types:
                         overall_temp_dict[f"{tag_type} Tag Count"] = overall_temp_dict[f"{tag_type} Pos Affinity Ratio"]\
@@ -485,11 +515,11 @@ class AffDBEntryCreator:
                         self.aff_db_entry_dict[f"{tag_name} Affinity"].append(aff_tag_weight)
                         self.aff_db_entry_dict[f"{tag_name} Pos Affinity"].append(pos_aff_tag_weight)
 
-                if self.user.scores[entry] and shows_to_take == "watched":
-                    # tf is this?
+                # if self.user.scores[entry] and shows_to_take == "watched":
+                if shows_to_take.startswith("watched"):
                     self.aff_db_entry_dict['User Score'].append(self.user.scores[entry])
 
-                show_score = self.data.mean_score_per_show[entry].item()
+                show_score = self.data.mean_score_per_show[entry]
                 self.aff_db_entry_dict['Show Score'].append(show_score)
                 self.aff_db_entry_dict['Mean Score'].append(self.user.mean_of_watched)
                 self.aff_db_entry_dict['Standard Deviation'].append(self.user.std_of_watched)
@@ -508,10 +538,10 @@ class AffDBEntryCreator:
 
         for rec_anime, rec_rating in recommended_shows.items():
             if rec_anime in self.data.relevant_shows and self.user.scores[rec_anime] and rec_rating > 0:
-                MAL_score = self.data.mean_score_per_show[rec_anime][0]
+                MAL_score = self.data.mean_score_per_show[rec_anime]
                 MAL_score_coeff = -0.6 * MAL_score + 5.9
                 user_diff = self.user.scores[rec_anime] - self.user.mean_of_watched
-                MAL_diff = self.data.mean_score_per_show[rec_anime][0] - self.user.MAL_mean_of_watched
+                MAL_diff = self.data.mean_score_per_show[rec_anime] - self.user.MAL_mean_of_watched
                 rec_affinity += (user_diff - MAL_diff * MAL_score_coeff) * rec_rating
 
         try:
@@ -821,7 +851,7 @@ class AffDBEntryCreator:
 class AffinityDB:
     _instance = None
 
-    minor_parts_per_process = 500
+    total_minor_parts = 3000
     size_limit = 20_000_000
 
     def __new__(cls, *args, **kwargs):
@@ -843,7 +873,7 @@ class AffinityDB:
         self._db_type = db_type
         # self.anime_df = AnimeDB()
         # self.tags = Tags()
-        # self.graphs = Graphs() #remove the selfs from other classes too?...
+        self.graphs = Graphs() #remove the selfs from other classes too?...
 
     @dataclass
     class Features:
@@ -878,6 +908,7 @@ class AffinityDB:
         return self._data
 
     def get_means_of_OG_affs(self):
+        self._data = load_pickled_file(data_path / "general_data.pickle")
         users_tag_affinity_dict = {}
         tags = Tags()
         user_db = UserDB()
@@ -925,15 +956,18 @@ class AffinityDB:
 
     # @timeit
     def create(self):
-        parts = int(os.cpu_count() / 4)
+        parts = int(os.cpu_count() / cpu_share)  # 1/cpu_share of available cores
         if not os.path.exists(aff_db_path / f"UserDB-P{parts}.parquet"):
             user_db = UserDB()
             user_db.split_df(parts)
             del user_db
+            time.sleep(5)
 
         if not os.path.isfile(data_path / "general_data.pickle"):
             data = GeneralData()
             data.generate_data()
+            data = self.get_means_of_OG_affs()
+
             save_pickled_file(data_path / "general_data.pickle", data)
 
         with ProcessPoolExecutor(max_workers=parts) as executor:
@@ -990,7 +1024,9 @@ class AffinityDB:
         user_amount = partial_main_df.shape[0]
 
         # We want to save the data fairly often, otherwise the data collecting process will become slower
-        save_data_per = user_amount // self.minor_parts_per_process
+        minor_parts_to_create = self.total_minor_parts/num_parts
+
+        save_data_per = user_amount // (self.total_minor_parts / num_parts)
         t1 = time.perf_counter()
 
         # get_means_of_OG_affs()
@@ -1017,16 +1053,16 @@ class AffinityDB:
 
             if (user_index + 1) % save_data_per == 0:
                 subpart_num = (user_index + 1) // save_data_per
-                print(f"Finished processing user {self.data.user_amount * i + user_index + 1},"
-                      f" saving PP-{self.minor_parts_per_process * i + subpart_num}")
+                print(f"Finished processing user {user_amount * i + user_index + 1},"
+                      f" saving PP-{int(minor_parts_to_create * i + subpart_num)}")
                 # save_pickled_file(f"user_tag_affinity_dict-PP{subpart_num}.pickle", user_tag_affinity_dict)
                 # Fix the above (either remove this entirely or concatenate them at the end?)
 
                 for key in aff_db_dict.keys():
                     aff_db_dict[key] = np.array(aff_db_dict[key], dtype=np.float32)
 
-                pl.DataFrame(aff_db_dict).write_parquet(data_path /
-                    f"{aff_db_filename}-PP{self.minor_parts_per_process * i + subpart_num}.parquet")
+                pl.DataFrame(aff_db_dict).write_parquet(data_path / "Partials" /
+                    f"{aff_db_filename}-PP{int(minor_parts_to_create * i + subpart_num)}.parquet")
 
 
                 # Each batch of save_data_per users will be separated into their own mini-database during
@@ -1054,7 +1090,7 @@ class AffinityDB:
         df = pl.read_parquet(aff_db_path / f"{aff_db_filename}-PP1.parquet")
         size = count_of_minor_chunks()
         pbar = tqdm(leave=True, desc="Combining", unit=" major chunks", colour="blue")
-        for i in range(2, 100000):
+        for i in range(226, 100000):
             try:
                 # print(f"Unpacking minor chunk {i} of database")
                 temp_df = pl.read_parquet(aff_db_path / f"{aff_db_filename}-PP{i}.parquet")
@@ -1069,6 +1105,7 @@ class AffinityDB:
                 pbar.total = int(np.ceil(size/i*j))
                 pbar.update(1)
                 j += 1
+                print(f"Currently on minor chunk {i}")
 
     def shuffle(self):
         p = self.major_parts
@@ -1083,8 +1120,9 @@ class AffinityDB:
             sub_size = int(len(df) / p)
             for j in range(p):
                 df[j * sub_size:(j + 1) * sub_size].to_parquet(
-                    aff_db_path / f"{aff_db_filename}-PP{p * i + j + 1}.parquet")
+                    aff_db_path / f"{aff_db_filename}-PPS{p * i + j + 1}.parquet")
                 pbar.update(1)
+                print(f"Currently on square-minor chunk {p*i + j + 1}")
 
         print("Finished shuffling all major parts. Beginning to recombine.")
         pbar2 = tqdm(total=p, leave=True, desc="Recombining", unit=" major chunks", colour="#CF9FFF")
@@ -1092,7 +1130,7 @@ class AffinityDB:
             df = pd.DataFrame()
             for j in range(i, p * p, p):
                 # print(f"--Loading minor shuffled part {j + 1} of database--")
-                chunk = pd.read_parquet(aff_db_path / f"{aff_db_filename}-PP{j + 1}.parquet")
+                chunk = pd.read_parquet(aff_db_path / f"{aff_db_filename}-PPS{j + 1}.parquet")
                 df = pd.concat([df, chunk], ignore_index=True)
 
             # print(f"---------Writing major shuffled part {i + 1} of database----------")
@@ -1174,6 +1212,18 @@ class AffinityDB:
         return df
 
     @staticmethod
+    def filter_df_for_model(df):
+        # cols_to_take = [x for x in df.columns if x.startswith("Single") or (x.startswith('Double')
+        #                                                                     and not x.startswith('Doubles-'))
+        #                 or x in ['Mean Score', 'Standard Deviation', 'Recommended Shows Affinity', 'Sequel',
+        #                          'Length Coeff', 'Score Difference', 'User Scored Shows', 'User Score']
+        #                 or "Genres" in x or "Studio" in x]
+        cols_to_take = [x for x in df.columns if not x.startswith("Doubles-")
+                             and x != 'Show Score' and x != 'Show Popularity' and x != 'User Score' and 'Tag Count' not in x] #add score difference to this
+        df = df[cols_to_take]
+        return df
+
+    @staticmethod
     def remove_show_score():
         p = AffinityDB.count_major_parts()
         pbar = tqdm(total=p, leave=True, desc="Removing excess columns from", unit=" major chunks", colour="#888888")
@@ -1183,16 +1233,16 @@ class AffinityDB:
             # for j in range(1,31):
             #     for stat in ["Max Affinity", "Min Affinity", "Avg Affinity", "Max Pos Affinity"]:
             #         df.drop(f"Doubles-{j} {stat}", inplace=True, axis=1)
-            cols_to_take = [x for x in df.columns if not x.startswith("Doubles-")
-                            and x != 'Show Score' and x != 'Show Popularity' and 'Tag Count' not in x]
-            cols_to_take = [x for x in df.columns if x.startswith("Single") or (x.startswith('Double')
-                                                                                and not x.startswith('Doubles-'))
-                            or x in ['Mean Score', 'Standard Deviation', 'Recommended Shows Affinity', 'Sequel',
-                                     'Length Coeff', 'Score Difference', 'User Scored Shows', 'User Score']
-                            or "Genres" in x or "Studio" in x]
+            # cols_to_take = [x for x in df.columns if not x.startswith("Doubles-")
+            #                 and x != 'Show Score' and x != 'Show Popularity' and 'Tag Count' not in x]
+            # cols_to_take = [x for x in df.columns if x.startswith("Single") or (x.startswith('Double')
+            #                                                                     and not x.startswith('Doubles-'))
+            #                 or x in ['Mean Score', 'Standard Deviation', 'Recommended Shows Affinity', 'Sequel',
+            #                          'Length Coeff', 'Score Difference', 'User Scored Shows', 'User Score']
+            #                 or "Genres" in x or "Studio" in x]
             # cols_to_take = [x for x in df.columns if not x=='Show Score']
-            df = df[cols_to_take]
-            df.to_parquet(aff_db_path / f"{aff_db_filename}-P{i + 1}-N-RSDDPCA.parquet")
+            df = AffinityDB.filter_df_for_model(df)
+            df.to_parquet(aff_db_path / f"{aff_db_filename}-P{i + 1}-N-{model_filename_suffix}.parquet")
             pbar.update(1)
 
     @staticmethod

@@ -1,19 +1,22 @@
 from pathlib import Path
 current_dir = Path(__file__).parent
 data_path = current_dir.parent / 'data'
-models_path = current_dir.parent / 'models'
+models_path = current_dir.parent / 'MLmodels'
+model_filename_suffix = "RSDD"
+current_model_name = "T1-4-50-RSDD.h5"
+# current_model_filepath = models_path / current_model_name
 auth_filename = data_path / "Authorization.txt"
 user_database_name = data_path / "UserDB.parquet"
-anime_database_name = data_path / "AnimeDB.parquet"
+anime_database_name = data_path / "AnimeDB-T.parquet"
 MAL_users_filename = data_path / "MALUsers.csv"
 blacklist_users_filename = data_path / "Blacklist.csv"
 scores_dict_filename = data_path / "ScoresDBDict.pickle"
 aff_db_path = data_path / "Partials"
-aff_db_filename = "AffinityDB-T4"
+aff_db_filename = "AffinityDB"
 # The lack of extension is on purpose ^
-entry_tags_filename = data_path / "entry_tags_dict2.pickle"
-entry_tags_filename2 = data_path / "entry_tags_dict2-2.pickle"
-shows_tags_filename = data_path / "shows_tags_dict2.pickle"
+entry_tags_filename = data_path / "entry_tags_dict.pickle"
+entry_tags_filename2 = data_path / "entry_tags_dict2.pickle"
+shows_tags_filename = data_path / "shows_tags_dict.pickle"
 graphs_dict_filename = data_path / "all_graphs.pickle"
 relations_dict_filename = data_path / "anime_relations.pickle"
 user_tag_affinity_dict_filename = data_path / "user_tag_affinity_dict.pickle"

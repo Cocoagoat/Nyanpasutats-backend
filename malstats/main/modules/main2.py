@@ -3,7 +3,7 @@ try:
 except ImportError:
     import _thread as thread
 import urllib3
-from affinity_finder import find_max_affinity
+from main.modules.AffinityFinder import find_max_affinity
 
 
 if __name__ == '__main__':

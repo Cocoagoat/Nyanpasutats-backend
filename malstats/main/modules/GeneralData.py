@@ -38,7 +38,8 @@ class GeneralData:
         partial_main_df = user_db.df.select(user_db.stats + self.relevant_shows)
         partial_anime_df = anime_db.df.select(["Rows"] + self.relevant_shows)
 
-        self.mean_score_per_show = partial_anime_df.filter(pl.col('Rows') == "Mean Score")
+        self.mean_score_per_show = partial_anime_df.filter(pl.col('Rows') == "Mean Score").to_dict(as_series=False)
+        self.mean_score_per_show = {show: mean_score[0] for show, mean_score in self.mean_score_per_show.items()}
         self.scored_members_per_show = partial_anime_df.filter(pl.col('Rows') == "Scores").to_dict(
             as_series=False)
         self.scored_shows_per_user = user_db.df['Scored Shows'].to_list()

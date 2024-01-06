@@ -11,6 +11,8 @@ import os
 
 from django.core.wsgi import get_wsgi_application
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'malstats.settings')
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'malstats.malstats.settings')
+
 
 application = get_wsgi_application()

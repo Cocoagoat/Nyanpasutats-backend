@@ -27,7 +27,8 @@ except ImportError:
     import _thread as thread
 from colorama import Fore
 from polars.exceptions import ColumnNotFoundError
-from .filenames import *
+from main.modules.filenames import *
+from main.modules.Errors import UserListPrivateError, UserDoesNotExistError, UserListFetchError
 # from .AffinityDB import GeneralData
 # from . import AffinityDB
 
@@ -42,7 +43,7 @@ class ErrorCauses(Enum):
     BAD_REQUEST = "BAD_REQUEST"
 
 
-logging.basicConfig(level=logging.WARNING, filename='Test.log', filemode='a',
+logging.basicConfig(level=logging.WARNING, filename=data_path /'Test.log', filemode='a',
                     format="[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s")  #
 logger = logging.getLogger('MALRecommendations')
 logger.setLevel(level=logging.DEBUG)
@@ -99,8 +100,8 @@ def call_function_through_process(func, *args):
         if p.is_alive():
             if not q.empty():
                 value = q.get()
-                print(f"q is not empty, value is {value}")
-                print(type(value))
+                # print(f"q is not empty, value is {value}")
+                # print(type(value))
                 if isinstance(value, Sleep):
                     time_start = time_start + value.time
                     print(f"Command to sleep {value.time} seconds"
@@ -125,7 +126,7 @@ def call_function_through_process(func, *args):
         p.join()
         print(Fore.LIGHTWHITE_EX + "Process successfully finished on time")
         logger.debug("Process successfully finished on time")
-    print(f"returned value is {value}")
+    # print(f"returned value is {value}")
     return value
 
 
@@ -168,6 +169,16 @@ def get_headers():
     return headers
 
 
+def fetch_new_headers():
+    access_token = AccessToken.get_access_token()
+    with open(auth_filename, "w") as f:
+        f.write(f'Bearer {access_token["access_token"]}')
+        f.write("\n")
+        f.write(f'{access_token["refresh_token"]}')
+    time.sleep(3)
+    return get_headers()
+
+
 try:
     headers = get_headers()
 except FileNotFoundError:
@@ -185,6 +196,10 @@ def list_to_uint8_array(lst):
     arr = np.array(lst, dtype=np.float32)  # First, we convert to float to handle None values
     arr = np.nan_to_num(arr, nan=0).astype(np.uint8)  # Now we can replace nan with 0 and convert to uint8
     return arr
+
+
+def sort_dict_by_values(d, reverse=True):
+    return {k: v for k, v in sorted(d.items(), key=lambda x: x[1], reverse=reverse)}
 
 
 def determine_unauthorized_cause(q=None):
@@ -230,24 +245,25 @@ def determine_unauthorized_cause(q=None):
             # Give call_function_through_process time to get from queue
             return
         access_token = AccessToken.get_access_token()
-        with open("Authorization.txt", "w") as f:
+        with open(auth_filename, "w") as f:
             f.write(f'Bearer {access_token["access_token"]}')
             f.write("\n")
             f.write(f'{access_token["refresh_token"]}')
-            time.sleep(Sleep.SHORT_SLEEP)
+
+        time.sleep(5)
         headers = get_headers()
         print(f'New headers: \n {headers}')
         response = requests.get(dummy_url, headers=headers)
         print(f'Trying the dummy request after requesting a new Bearer '
               f'Token, response is {response} \n')  #
 
-        # if response.status_code == 200:
-        #     # If we got 200 after getting new headers, the problem was solved.
-        #     print('Headers were expired, successfully acquired new headers.'
-        #           'Proceeding with same anime list')
-        #     logger.debug('Headers were expired, successfully acquired new headers.'
-        #                  'Proceeding with same anime list')
-        #     return ErrorCauses.HEADERS_EXPIRED
+        if response.status_code == 200:
+            # If we got 200 after getting new headers, the problem was solved.
+            print('Headers were expired, successfully acquired new headers.'
+                  'Proceeding with same anime list')
+            logger.debug('Headers were expired, successfully acquired new headers.'
+                         'Proceeding with same anime list')
+            return ErrorCauses.HEADERS_EXPIRED
 
         if response.status_code == 401 or response.status_code == 403:
             # If we got 401/403 even after receiving new headers,
@@ -293,7 +309,7 @@ def analyze_unauthorized_cause(unauthorized_cause, url, q=None):
     if unauthorized_cause == ErrorCauses.RESOURCE_LOCKED:
         # Problem is resource-specific (e.g user list is locked),
         # moving on to next resource since this one cannot be retrieved.
-        return None
+        return "RESOURCE_LOCKED"
     if unauthorized_cause == ErrorCauses.HEADERS_EXPIRED or ErrorCauses.TOO_MANY_REQUESTS:
         # Cause was determined to be expired headers/shadow rate limit,
         # retrying the same request again.
@@ -378,6 +394,35 @@ def split_list_interval(input_list, n_parts):
 #         break
 
 
+def get_data(url):
+    for _ in range(10):
+        try:
+            time.sleep(1)
+            headers=get_headers()
+            response = requests.get(url, headers=headers, timeout=15)
+            print(response)
+            if response.status_code == HTTPStatus.OK:
+                return response.json()
+            elif response.status_code == HTTPStatus.UNAUTHORIZED.value:
+                headers = fetch_new_headers()
+                continue
+            elif response.status_code == HTTPStatus.FORBIDDEN.value:
+                raise UserListPrivateError
+            elif response.status_code == HTTPStatus.NOT_FOUND.value:
+                raise UserDoesNotExistError
+            else:
+                print(response.status_code)
+                continue
+        except (SSLError, ConnectionError, requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError, http.client.RemoteDisconnected, ProtocolError, ConnectionResetError) as e:
+            # Sometimes MAL throws a weird SSL error, retrying fixes it
+            time.sleep(Sleep.SHORT_SLEEP)
+            print("Error, retrying connection")
+            logger.debug("Error, retrying connection")
+            continue
+
+    raise UserListFetchError("Unable to connect to server. Please try again later.")
+
+
 def get_search_results(url, q=None):
     """ The main "get" function, tweaked to automatically handle various errors as the
     main program needs to run several days without stopping
@@ -407,9 +452,10 @@ def get_search_results(url, q=None):
     for _ in range(10):
         try:
             response = requests.get(url, headers=headers, timeout=15)
+            time.sleep(1)
             # print(response.status_code)
             # print(response.json())
-        except (SSLError, ConnectionError, http.client.RemoteDisconnected, ProtocolError, ConnectionResetError) as e:
+        except (SSLError, ConnectionError, requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError, http.client.RemoteDisconnected, ProtocolError, ConnectionResetError) as e:
             # Sometimes MAL throws a weird SSL error, retrying fixes it
             time.sleep(Sleep.SHORT_SLEEP)
             print("Error, retrying connection")
@@ -427,20 +473,24 @@ def get_search_results(url, q=None):
             # Due to the way the MAL API works, the error 401/403 case is very complex
             # to handle if we want our program to keep running without any errors.
             unauthorized_cause = determine_unauthorized_cause(q)
-            response = analyze_unauthorized_cause(unauthorized_cause, url, q)
+            response_cause = analyze_unauthorized_cause(unauthorized_cause, url, q)
+            if response_cause == "RESOURCE_LOCKED":
+                print(response, 5)
+                raise UserListPrivateError
+                # return
 
-        if response.status_code == HTTPStatus.NOT_FOUND:  # If it's a list, user was probably deleted
+        elif response.status_code == HTTPStatus.NOT_FOUND:  # If it's a list, user was probably deleted
                 # test sleep queue here
             logger.error("Resource does not exist, moving on to next resource")
-            return None
+            raise UserDoesNotExistError
 
-        if response.status_code == HTTPStatus.BAD_REQUEST:
+        elif response.status_code == HTTPStatus.BAD_REQUEST:
             # This should never happen within the scope of the program
             logger.error("There was a problem with the request itself,"
                          "moving on to next resource")  #
-            return None
+            raise UserListFetchError("Unknown error fetching list")
 
-        if response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR\
+        elif response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR\
                 or response.status_code == HTTPStatus.BAD_GATEWAY\
                 or response.status_code == HTTPStatus.SERVICE_UNAVAILABLE\
                 or response.status_code == HTTPStatus.REQUEST_TIMEOUT:
@@ -482,8 +532,8 @@ def get_search_results(url, q=None):
         if q is not None:
             # If we're calling the function through a separate process, we want
             # to pass it our return value through the queue.
-            print("Putting json into queue")
-            print(f"Response before putting its json into queue : {response.json()}")
+            # print("Putting json into queue")
+            # print(f"Response before putting its json into queue : {response.json()}")
             q.put(response.json())
         return response.json()
     except (JSONDecodeError, AttributeError) as ex:

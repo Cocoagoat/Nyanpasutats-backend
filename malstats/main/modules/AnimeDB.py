@@ -1,5 +1,10 @@
 from .filenames import *
 from .MAL_utils import *
+# import django
+# import os
+# os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'malstats.malstats.settings')
+# django.setup()
+from main.models import AnimeData
 
 
 class AnimeDB:
@@ -31,6 +36,7 @@ class AnimeDB:
     # │ on   ┆            ┆            ┆           ┆   ┆          ┆            ┆            ┆            │
     # └──────┴────────────┴────────────┴───────────┴───┴──────────┴────────────┴────────────┴────────────┘
 
+    # noinspection DuplicatedCode
     def __new__(cls, *args, **kwargs):
         """The class is a Singleton - we only need one instance of it since its purpose is
         to house and create on demand all the data structures that are used in this project."""
@@ -39,6 +45,15 @@ class AnimeDB:
             cls._instance._df = None
             cls._instance._titles = None
             cls._instance._partial_df = None
+            cls._instance._ids = None
+            cls._instance._mean_scores = None
+            cls._instance._scored_amounts = None
+            cls._instance._members = None
+            cls._instance._episodes = None
+            cls._instance._durations = None
+            cls._instance._media_types = None
+            cls._instance._seasons = None
+            cls._instance._years = None
         return cls._instance
 
     def __init__(self):
@@ -74,13 +89,86 @@ class AnimeDB:
             _partial_df = self.df.select(["Rows"] + titles)
         return _partial_df
 
+    @property
+    def ids(self):
+        if not self._ids:
+            ids_row = self.df.row(self.stats['ID'])
+            self._ids = {title : ID for (title,ID)
+                         in list(zip(self.titles, ids_row[1:]))}
+        return self._ids
+
+    @property
+    def mean_scores(self):
+        if not self._mean_scores:
+            mean_score_row = self.df.row(self.stats['Mean Score'])
+            self._mean_scores = {title: mean_score for (title, mean_score)
+                                 in list(zip(self.titles, mean_score_row[1:]))}
+        return self._mean_scores
+
+    @property
+    def scored_amounts(self):
+        if not self._scored_amounts:
+            scored_amounts_row = self.df.row(self.stats['Scores'])
+            self._scored_amounts = {title: scored_amount for (title, scored_amount)
+                                    in list(zip(self.titles, scored_amounts_row)[1:])}
+        return self._scored_amounts
+
+    @property
+    def members(self):
+        if not self._members:
+            members_row = self.df.row(self.stats['Members'])
+            self._members = {title: member_count for (title, member_count)
+                             in list(zip(self.titles, members_row[1:]))}
+        return self._members
+
+    @property
+    def episodes(self):
+        if not self._episodes:
+            episodes_row = self.df.row(self.stats['Episodes'])
+            self._episodes = {title: episode_count for (title, episode_count)
+                              in list(zip(self.titles, episodes_row[1:]))}
+        return self._episodes
+
+    @property
+    def durations(self):
+        if not self._durations:
+            durations_row = self.df.row(self.stats['Duration'])
+            self._durations = {title: duration for (title, duration)
+                               in list(zip(self.titles, durations_row[1:]))}
+        return self._durations
+
+    @property
+    def media_types(self):
+        if not self._media_types:
+            media_types_row = self.df.row(self.stats['Type'])
+            self._media_types = {title: media_type for (title, media_type)
+                                 in list(zip(self.titles, media_types_row[1:]))}
+        return self._media_types
+
+    @property
+    def seasons(self):
+        if not self._seasons:
+            seasons_row = self.df.row(self.stats['Season'])
+            self._seasons = {title: season for (title, season) in list(zip(self.titles, seasons_row[1:]))}
+        return self._seasons
+
+    @property
+    def converted_seasons(self):
+        return {title: Seasons(season_num).name if season_num else None for (title, season_num) in self.seasons.items()}
+
+    @property
+    def years(self):
+        if not self._years:
+            years_row = self.df.row(self.stats['Year'])
+            self._years = {title: year for (title, year) in list(zip(self.titles, years_row[1:]))}
+        return self._years
+
     def show_meets_conditions(self,show_stats: dict):
         if int(show_stats[self.stats["Scores"]]) >= 2000 \
                 and show_stats[self.stats["Duration"]] * \
                 show_stats[self.stats["Episodes"]] >= 15\
                 and show_stats[self.stats["Duration"]]>=2\
                 and show_stats[self.stats["Mean Score"]]>=6.5:
-                # and show_stats[self.stats["Year"]]>2005:
             return True
         return False
 
@@ -113,7 +201,7 @@ class AnimeDB:
         return stats_dict
 
     @staticmethod
-    def generate_anime_DB(self, non_sequels_only=False):
+    def generate_anime_DB(non_sequels_only=False):
         """Creates the anime database which contains data (as defined in required_fields)
         on every show"""
 
@@ -166,6 +254,12 @@ class AnimeDB:
 
             title = anime["node"]["title"]
             anime_data_dict[title] = anime_data
+
+            # For now I only need the image url in SQLite form, everything else is only used
+            # by internal scripts which are built for .parquet databases
+            new_entry = AnimeData(image_url=anime['node']['main_picture']['medium'])
+            new_entry.save()
+
             return title  # Title is returned to check whether we reached the last show
 
         last_show_reached = False
@@ -213,7 +307,7 @@ class AnimeDB:
 
             for anime in anime_batch["data"]:
                 if not non_sequels_only:
-                    title = create_anime_DB_entry(anime, url_required_fields)
+                    title = create_anime_DB_entry(anime)
                 if title.startswith(last_show):
                     last_show_reached = True
                     break

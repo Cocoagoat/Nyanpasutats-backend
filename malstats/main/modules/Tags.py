@@ -69,6 +69,10 @@ class Tags:
             cls._instance._all_doubletags = []
             cls._instance._single_tags_used_for_doubles = []
             cls._instance.graphs = Graphs()
+            # try:
+            #     cls._instance.data = load_pickled_file(data_path / "general_data.pickle")
+            # except FileNotFoundError:
+            #     cls._instance.data = GeneralData().generate_data()
             cls._instance.tag_types = ["Single", "Double"]
         return cls._instance
 
@@ -148,6 +152,10 @@ class Tags:
 
     @property
     def tags_per_category(self):
+        """
+
+        :return: A dictionary of categories, with each category having a separate group of tags in a list.
+        """
         if not self._tags_per_category:
             self._tags_per_category = {x['category']: [] for entry in self.entry_tags_dict.keys()
                                        for x in self.entry_tags_dict[entry]['Tags']}
@@ -176,7 +184,7 @@ class Tags:
             theme_dict = {f"Themes-{i + 1}": split_themes[i] for i in range(len(split_themes))}
 
             doubles_dict = {f"Doubles-{i + 1}": split_doubles[i] for i in range(len(split_doubles))}
-
+            doubles_dict2 = {"Doubles": doubles} # This will take effect after resetting db, use later
             tag_counts = self.get_single_tag_counts()
             relevant_tags = []
             for tag, count in tag_counts.items():
@@ -185,20 +193,35 @@ class Tags:
                 else:
                     break
 
-            doubles_per_tag = {f"Doubles-{tag}" : [double_tag
-                                                         for double_tag in doubles if f"<{tag}>"
-                                                         in double_tag] for tag in relevant_tags}
+            # doubles_per_tag = {f"Doubles-{tag}" : [double_tag
+            #                                              for double_tag in doubles if f"<{tag}>"
+            #                                              in double_tag] for tag in relevant_tags}
 
-            self._tags_per_category = self._tags_per_category | theme_dict | doubles_per_tag | doubles_dict
+            self._tags_per_category = self._tags_per_category | theme_dict | doubles_dict   #| doubles_per_tag
         return self._tags_per_category
+
+    def get_category_tag_type(self, category):
+        """
+
+        :param category: Name of the category
+        :return: Either "Single" or "Double"
+        """
+        try:
+            first_tag_name = self.tags_per_category[category][0]
+        except KeyError:
+            return "Single"  # Genres or Studios will always be single tags
+        tag_type = "Single" if first_tag_name and "<" not in first_tag_name else "Double"
+        # All tags in a category will be of the same type, only doubletags have "<>" in them.
+        return tag_type
 
     @property
     def relevant_tags_for_double(self):
         pass
 
     def get_full_tags_list(self):
-        with open(data_path / "NSFWTags.txt", 'r') as file:
-            banned_tags = file.read().splitlines()
+        # with open(data_path / "NSFWTags.txt", 'r') as file:
+        #     banned_tags = file.read().splitlines()
+        banned_tags = self.get_banned_tags()
         tags = OrderedSet()
         for show, show_dict in self.entry_tags_dict.items():
             if 'Tags' in show_dict:
@@ -330,9 +353,21 @@ class Tags:
 
         def get_shows_from_page(page_num):
             variables = {"page": page_num, "isAdult": False}
-            response = requests.post(url, json={"query": self.query, "variables": variables}).json()
-            show_list = response["data"]["Page"]["media"]
-            has_next_page = response["data"]["Page"]["pageInfo"]["hasNextPage"]
+
+            response_received = False
+            while not response_received:
+                try:
+                    response = requests.post(url, json={"query": self.query, "variables": variables}, timeout=15).json()
+                    response_received = True
+                except requests.exceptions.ReadTimeout:
+                    print("Request timed out, retrying")
+                    continue
+            time.sleep(1.5)
+            try:
+                show_list = response["data"]["Page"]["media"]
+                has_next_page = response["data"]["Page"]["pageInfo"]["hasNextPage"]
+            except:
+                print("5")
             return show_list, has_next_page
 
         def get_entry_data(entry):
@@ -348,6 +383,7 @@ class Tags:
                 try:
                     main_entry, _ = self.graphs.find_related_entries(title)
                 except TypeError:
+                    print("Error finding related entry in graphs")
                     return
 
                 entry_data = {
@@ -363,9 +399,10 @@ class Tags:
                 return title, entry_data
 
         anime_db = AnimeDB()
-        with open("NSFWTags.txt", 'r') as file:
-            # Banned tags are mostly NSFW stuff that doesn't exist in regular shows
-            banned_tags = file.read().splitlines()
+        banned_tags = self.get_banned_tags()
+        # with open("NSFWTags.txt", 'r') as file:
+        #     # Banned tags are mostly NSFW stuff that doesn't exist in regular shows
+        #     banned_tags = file.read().splitlines()
         url = "https://graphql.anilist.co"
         ids = anime_db.df.row(anime_db.stats['ID'])[1:]
         has_next_page = True
@@ -387,7 +424,8 @@ class Tags:
             time.sleep(1)
 
         # I have no idea wtf this is but every elegant mitigation measure against it failed
-        del self._entry_tags_dict['Black Clover: Mahou Tei no Ken']
+        if 'Black Clover: Mahou Tei no Ken' in self._entry_tags_dict.keys():
+            del self._entry_tags_dict['Black Clover: Mahou Tei no Ken']
 
         # tag_counts = self.get_single_tag_counts()
         #
@@ -487,7 +525,7 @@ class Tags:
 
         processed_titles = []
         show_amount = len(self.entry_tags_dict.keys())
-
+        anime_db = AnimeDB()
         for i, entry in enumerate(self.entry_tags_dict.keys()):
 
             # print(show)
@@ -567,7 +605,7 @@ class Tags:
             self._show_tags_dict[main_entry]['Recommended'] = show_recommended
 
             # Related
-            stats_of_related_entries = self.anime_db.get_stats_of_shows(show_related_entries,
+            stats_of_related_entries = anime_db.get_stats_of_shows(show_related_entries,
                                                                         ["Episodes", "Duration"])
             related = {}
             for entry in show_related_entries:
@@ -626,21 +664,31 @@ class Tags:
                 return i
         return -1
 
-    def get_avg_score_of_show(self,show, mean_score_per_show):
-        entry_count = 1
-        avg = mean_score_per_show[show].item()
-        for entry, length_coeff in self.show_tags_dict[show]['Related'].items():
-            if length_coeff == 1 and entry != show:
-                avg += mean_score_per_show[entry].item()
-                entry_count += 1
-        return round(avg/entry_count,2)
+    # def get_avg_score_of_show(self,show):
+    #     entry_count = 1
+    #     avg = self.data.mean_score_per_show[show]#.item()
+    #     for entry, length_coeff in self.show_tags_dict[show]['Related'].items():
+    #         if length_coeff == 1 and entry != show:
+    #             avg += self.data.mean_score_per_show[entry]#.item()
+    #             entry_count += 1
+    #     return round(avg/entry_count,2)
 
-    def get_max_score_of_show(self,show,mean_score_per_show):
-        max_score = mean_score_per_show[show].item()
+    def get_max_score_of_show(self,show,scores):
+        """
+
+        :param show: Name of the show.
+        :param scores: A dictionary of all the user's scores. If left empty, it means we want
+        to calculate the max MAL score of the show (among all its entries, for example maximum
+        score of My Hero Academia would be the 6th season's score as of 2023). If not, then the max user
+        score of all the show's entries.
+        :return:
+        """
+
+        max_score = scores[show]#.item()
         for entry, length_coeff in self.show_tags_dict[show]['Related'].items():
             if length_coeff == 1 and entry != show:
                 try:
-                    max_score = max(mean_score_per_show[entry].item(),max_score)
+                    max_score = max(scores[entry], max_score)
                 except (ColumnNotFoundError, TypeError) as e:
                     continue
         return max_score

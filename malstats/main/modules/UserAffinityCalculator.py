@@ -28,9 +28,10 @@ class UserAffinityCalculator:
 
         watched_titles = [title for title, score in user.scores.items() if score]
         # watched_MAL_score_dict = self.data.mean_score_per_show.select(watched_titles).to_dict(as_series=False)
-        watched_MAL_score_dict = data.mean_score_per_show.select(watched_titles).to_dict(as_series=False)
-        watched_MAL_score_list = [score[0] for title, score in
-                                  watched_MAL_score_dict.items() if title != "Rows"]
+        # watched_MAL_score_dict = data.mean_score_per_show.select(watched_titles).to_dict(as_series=False)
+        watched_MAL_score_list = [data.mean_score_per_show[title] for title in watched_titles]
+        # watched_MAL_score_list = [score[0] for title, score in
+        #                           watched_MAL_score_dict.items() if title != "Rows"]
 
         user.MAL_mean_of_watched = np.mean(watched_MAL_score_list)
         user.mean_of_watched = np.mean(watched_user_score_list)
@@ -177,7 +178,7 @@ class UserAffinityCalculator:
 
                 length_coeff = length_coeff / sum_of_length_coeffs
 
-                MAL_score = self.data.mean_score_per_show[related_entry][0]
+                MAL_score = self.data.mean_score_per_show[related_entry]
                 if MAL_score < 6.5:
                     print("Warning - MAL score lower than 6.5")
                     continue
@@ -219,7 +220,7 @@ class UserAffinityCalculator:
             entry_user_score = self.user.scores[entry]
             if not entry_user_score:
                 continue
-            entry_MAL_score = self.data.mean_score_per_show[entry].item()
+            entry_MAL_score = self.data.mean_score_per_show[entry]
 
             new_mean_of_watched = (new_mean_of_watched * new_user_show_count) - entry_user_score * length_coeff
             new_MAL_mean = (new_MAL_mean * new_user_show_count) - entry_MAL_score * length_coeff
@@ -303,12 +304,15 @@ class UserAffinityCalculator:
                     pos_aff_per_entry_for_tag[entry] = 0
             show_pos_aff = sum(pos_aff_per_entry_for_tag.values())
 
-            OG_pos_aff = self.user.tag_pos_affinity_dict[tag] * self.user.tag_counts[tag]
-            OG_pos_aff /= self.user.freq_coeff_per_tag[tag]
-            new_pos_aff = OG_pos_aff - show_pos_aff
-            new_pos_aff *= new_freq_coeffs[tag]
-            new_pos_aff /= new_user_tag_count[tag]
-            self.user.adj_pos_tag_affinity_dict[tag] = new_pos_aff
+            try:
+                OG_pos_aff = self.user.tag_pos_affinity_dict[tag] * self.user.tag_counts[tag]
+                OG_pos_aff /= self.user.freq_coeff_per_tag[tag]
+                new_pos_aff = OG_pos_aff - show_pos_aff
+                new_pos_aff *= new_freq_coeffs[tag]
+                new_pos_aff /= new_user_tag_count[tag]
+                self.user.adj_pos_tag_affinity_dict[tag] = new_pos_aff
+            except ZeroDivisionError:
+                self.user.adj_pos_tag_affinity_dict[tag] = 0
 
     @staticmethod
     def MAL_score_coeff(score):

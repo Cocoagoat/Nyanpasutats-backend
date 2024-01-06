@@ -6,8 +6,8 @@ from filenames import data_path
 try:
     with open(data_path / "Client_details.txt") as f:
         id_secret = f.readlines()
-    CLIENT_ID = id_secret[0][:-1]
-    CLIENT_SECRET = id_secret[1]
+    CLIENT_ID = id_secret[0].strip()
+    CLIENT_SECRET = id_secret[1].strip()
 except IndexError:
     print("ERROR - Client_details.txt is not in the correct format")
     sys.exit(1)
@@ -23,9 +23,8 @@ def get_new_code_verifier() -> str:
 
 
 def get_initial_code_link(code_challenge):
-    url = f"""https://myanimelist.net/v1/oauth2/authorize?response_type=code
-    &client_id={CLIENT_ID}&code_challenge={code_challenge}"""
-    print(f'Authorise your application by clicking here: {url}\n')
+    url = f"""https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id={CLIENT_ID}&code_challenge={code_challenge}"""
+    print(f'Authorise your application by clicking here: {url}')
 
 
 def get_auth_token(authentication_code, code_verifier):
@@ -49,3 +48,14 @@ def get_access_token():
     access_token = get_auth_token(authentication_code, code_verifier)
     print(access_token)
     return access_token
+
+# def get_headers():
+#     headers = {}
+#     # with open('Authorization.txt', "r") as f:
+#     with open(auth_filename) as f:
+#         headers_list = f.read().splitlines()
+#         if headers_list:
+#             headers['Authorization'] = headers_list[0]
+#             headers['refresh_token'] = headers_list[1]
+#         headers['content-type'] = 'application/x-www-form-urlencoded'
+#     return headers

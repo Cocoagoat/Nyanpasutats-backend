@@ -2,9 +2,13 @@ try:
     import thread
 except ImportError:
     import _thread as thread
-from .filenames import *
-from .MAL_utils import *
-from .AnimeDB import AnimeDB
+
+import os
+from main.modules.filenames import *
+from main.modules.MAL_utils import *
+from main.modules.AnimeDB import AnimeDB
+from main.modules.GlobalValues import cpu_share
+from main.modules.Errors import UserListPrivateError
 
 
 class UserDB:
@@ -57,17 +61,46 @@ class UserDB:
 
     @property
     def df(self):
+
+        def user_prompted_filling():
+            # return (input("Continue filling database? Y/N") == 'Y')
+            return False
+
+
         """Polars database (stored as .parquet), contains username
         + mean score + scored shows + all the scores of each user in it."""
+        # if not isinstance(self._df, pl.DataFrame):
+        #     try:
+        #         print("Loading user database")
+        #         self._df = pl.read_parquet(user_database_name)
+        #         continue_filling = (input("Continue filling database? Y/N") == 'Y')
+        #         if continue_filling:
+        #             amount = int(input("Insert the desired amount of users\n"))
+        #             self.fill_main_database(amount)
+        #
+        #     except FileNotFoundError:
+        #         print("User database not found. Creating new user database")
+        #         self._df = pl.DataFrame(schema=self.schema_dict)
+        #         amount = int(input("Insert the desired amount of users\n"))
+        #         self.fill_main_database(amount)
+        # return self._df
         if not isinstance(self._df, pl.DataFrame):
+            file_loaded = False
+
             try:
                 print("Loading user database")
                 self._df = pl.read_parquet(user_database_name)
+                file_loaded = True
+
             except FileNotFoundError:
                 print("User database not found. Creating new user database")
-                amount = int(input("Insert the desired amount of users\n"))
                 self._df = pl.DataFrame(schema=self.schema_dict)
+
+            continue_filling = not file_loaded or user_prompted_filling()
+            if continue_filling:
+                amount = int(input("Insert the desired amount of users\n"))
                 self.fill_main_database(amount)
+
         return self._df
 
     @df.setter
@@ -93,24 +126,25 @@ class UserDB:
         df_size = len(self.df)
         part_size = int(df_size/parts)
         for i in range(parts):
-            print(f"Currently on part {i}")
+            print(f"Currently on part {i+1}")
             if i != parts-1:
                 df_part = self.df[i*part_size: (i+1)*part_size]
             else:
                 df_part = self.df[i*part_size:df_size]  # In case df_size/parts was rounded down by the casting
-            df_part.write_parquet(f'{str(user_database_name.parent).split(".")[0]}'
+            df_part.write_parquet(f'{str(user_database_name.parent).split(".")[0]}\\Partials'
                                   f'\\{str(user_database_name.name).split(".")[0]}-P{i+1}.parquet')
 
     def get_df_part(self, i):
         try:
             print(f"Loading part {i} of user database")
-            return pl.read_parquet(f'{str(user_database_name.parent).split(".")[0]}'
-                                   f'\\{str(user_database_name.name).split(".")[0]}-P{i+1}.parquet')
+            return pl.read_parquet(f'{str(user_database_name.parent).split(".")[0]}\\Partials'
+                                   f'\\{str(user_database_name.name).split(".")[0]}-P{i}.parquet')
         except FileNotFoundError:
-            print(f"Part {i} not found, splitting db into default 10 parts")
-            self.split_df(10)
-            return pl.read_parquet(f'{str(user_database_name.parent).split(".")[0]}'
-                                   f'\\{str(user_database_name.name).split(".")[0]}-P{i+1}.parquet')
+            print(f"Part {i} not found, splitting user db")
+            parts = int(os.cpu_count() / cpu_share)
+            self.split_df(parts)
+            return pl.read_parquet(f'{str(user_database_name.parent).split(".")[0]}\\Partials'
+                                   f'\\{str(user_database_name.name).split(".")[0]}-P{i}.parquet')
 
     @property
     def scores_dict(self):
@@ -332,7 +366,7 @@ class UserDB:
             # to avoid losing data in case the program stops for whatever reason.
             self.save_df()
 
-        save_data_per = 10
+        save_data_per = 100
         saved_so_far = 0
         min_scored_amount = 75000
         max_scored_amount = 500000
@@ -357,7 +391,6 @@ class UserDB:
         # ------------------------------ Main function starts here ----------------------------
 
         scores_db_dict = {}
-        print("Test")
         """This dictionary exists as temporary storage for user lists. Instead creating a new polars row
         and adding it to the database as we get it, we add it to this dictionary. Then, each
         save_data_per entries, we convert that dictionary to a Polars dataframe and concatenate
@@ -365,14 +398,12 @@ class UserDB:
 
         current_users = len(self.MAL_users_list)
 
-        print("Test 1.5")
         initial_users = current_users
 
         rows = self.anime_db.df.rows()
         ids = rows[0][1:]
         scored_amount = rows[2][1:]
 
-        print("Test 2")
         initialize_temp_scores_dict()
 
         print(f"Starting MAL user length/database size is : {len(self.MAL_users_list)}")
@@ -411,8 +442,10 @@ class UserDB:
                         if user_name.startswith('ishinashi'):
                             logger.debug("Retard troll detected, continuing on")
                             continue
-
-                        user_anime_list = get_user_MAL_list(user_name, full_list=False)
+                        try:
+                            user_anime_list = get_user_MAL_list(user_name, full_list=False)
+                        except UserListFetchError:
+                            continue  # Either user's list is private or doesn't exist, moving on to next username
                         dict_user_index = current_users - initial_users - saved_so_far
                         added = add_user_list_to_db_list(dict_user_index,
                                                          user_name, user_anime_list)
@@ -436,73 +469,71 @@ class UserDB:
                     # We reached the necessary amount of users in the database
                     return
 
-    def create_user_entry(self, user_name):
-        """Creates a user entry for the one we're calculating affinity for + returns a Polars row of their stats.
-        Currently not in use due to being time-inefficient at adding in real-time. New process maybe?"""
-        if user_name not in self.MAL_users_list and user_name not in self.blacklist:
-            user_list = get_user_MAL_list(user_name, full_list=False)
-            if not user_list:
-                print("Unable to access private user list. Please make your list public and try again.")
-                terminate_program()
-        else:
-            print("User already exists in database")
-            return
+    # def create_user_entry(self, user_name):
+    #     """Creates a user entry for the one we're calculating affinity for + returns a Polars row of their stats.
+    #     Currently not in use due to being time-inefficient at adding in real-time. New process maybe?"""
+    #     if user_name not in self.MAL_users_list and user_name not in self.blacklist:
+    #         user_list = get_user_MAL_list(user_name, full_list=False)
+    #         if not user_list:
+    #             print("Unable to access private user list. Please make your list public and try again.")
+    #             terminate_program()
+    #     else:
+    #         print("User already exists in database")
+    #         return
+    #
+    #     old_titles = [x for x in self.df.columns if x not in self.stats]
+    #
+    #     anime_indexes = {v: k for (k, v) in enumerate(old_titles)}
+    #     new_list = [None] * (len(old_titles))
+    #
+    #     show_amount = 0
+    #     score_sum = 0
+    #     for anime in user_list:  # anime_list, scores_db
+    #         title = anime['node']['title']
+    #         score = anime['list_status']['score']
+    #         if score == 0:
+    #             break
+    #         show_amount += 1
+    #         if title in self.anime_db.titles:
+    #             new_list[anime_indexes[title]] = score
+    #         score_sum += score
+    #
+    #     mean_score = round(score_sum / show_amount, 4)
+    #     new_list_for_return = list_to_uint8_array(new_list)  # We save the original list here,
+    #     # because later we'll have to add fields that are relevant for adding to DB but not for list comparison.
+    #
+    #     if 2 <= mean_score <= 9.7:  # Removing troll accounts/people who score everything 10/10
+    #         index = self.df.shape[0]
+    #         new_list = [index, user_name, mean_score, show_amount] + new_list
+    #
+    #         schema_dict = {'Index': pl.Int64, 'Username': pl.Utf8, 'Mean Score': pl.Float32,
+    #                        'Scored Shows': pl.UInt32} | \
+    #                       {x: y for (x, y) in zip(old_titles, [pl.UInt8] * len(old_titles))}
+    #
+    #         new_dict = {k: v for k, v in zip(self.df.columns, new_list)}
+    #
+    #         new_row = pl.DataFrame(new_dict, schema=schema_dict)
+    #         print(new_row)
+    #
+    #         self.df = pl.concat(
+    #             [
+    #                 self.df,
+    #                 new_row,
+    #             ],
+    #             how="vertical",
+    #         )
+    #
+    #         self.df.write_parquet(user_database_name)
+    #         self.MAL_users_list.append(user_name)
+    #         save_list_to_csv(self.MAL_users_list, MAL_users_filename)
+    #     return new_list_for_return
 
-        old_titles = [x for x in self.df.columns if x not in self.stats]
-
-        anime_indexes = {v: k for (k, v) in enumerate(old_titles)}
-        new_list = [None] * (len(old_titles))
-
-        show_amount = 0
-        score_sum = 0
-        for anime in user_list:  # anime_list, scores_db
-            title = anime['node']['title']
-            score = anime['list_status']['score']
-            if score == 0:
-                break
-            show_amount += 1
-            if title in self.anime_db.titles:
-                new_list[anime_indexes[title]] = score
-            score_sum += score
-
-        mean_score = round(score_sum / show_amount, 4)
-        new_list_for_return = list_to_uint8_array(new_list)  # We save the original list here,
-        # because later we'll have to add fields that are relevant for adding to DB but not for list comparison.
-
-        if 2 <= mean_score <= 9.7:  # Removing troll accounts/people who score everything 10/10
-            index = self.df.shape[0]
-            new_list = [index, user_name, mean_score, show_amount] + new_list
-
-            schema_dict = {'Index': pl.Int64, 'Username': pl.Utf8, 'Mean Score': pl.Float32,
-                           'Scored Shows': pl.UInt32} | \
-                          {x: y for (x, y) in zip(old_titles, [pl.UInt8] * len(old_titles))}
-
-            new_dict = {k: v for k, v in zip(self.df.columns, new_list)}
-
-            new_row = pl.DataFrame(new_dict, schema=schema_dict)
-            print(new_row)
-
-            self.df = pl.concat(
-                [
-                    self.df,
-                    new_row,
-                ],
-                how="vertical",
-            )
-
-            self.df.write_parquet(user_database_name)
-            self.MAL_users_list.append(user_name)
-            save_list_to_csv(self.MAL_users_list, MAL_users_filename)
-        return new_list_for_return
-
-    def get_user_db_entry(self,user_name):
-        """Creates a user entry for the one we're calculating affinity for + returns a Polars row of their stats.
-        Currently not in use due to being time-inefficient at adding in real-time. New process maybe?"""
+    def get_user_db_entry(self, user_name, return_type='db_row'):
         user_db = UserDB()
         user_list = get_user_MAL_list(user_name, full_list=False)
-        if not user_list:
-            print("Unable to access private user list. Please make your list public and try again.")
-            return
+        # if not user_list:
+        #     print("Unable to access private user list. Please make your list public and try again.")
+        #     return
 
         old_titles = [x for x in self.columns if x not in self.stats]
 
@@ -522,8 +553,14 @@ class UserDB:
                 new_list[anime_indexes[title]] = score
             score_sum += score
 
-        mean_score = round(score_sum / show_amount, 4)
-        new_list_for_return = list_to_uint8_array(new_list)
+        try:
+            mean_score = round(score_sum / show_amount, 4)
+        except ZeroDivisionError:
+            print("User has no scored shows. Aborting")  # Users are filtered (must have >50 scored shows), but
+            # technically a user can remove all his scores between the time they were added to the db and
+            # the time this program runs.
+            return
+
         # We save the original list here,
         # because later we'll have to add fields that are relevant for adding to DB but not for list comparison.
 
@@ -535,4 +572,9 @@ class UserDB:
         new_dict = {k: v for k, v in zip(self.columns, new_list)}
 
         new_row = pl.DataFrame(new_dict, schema=schema_dict)
-        return new_row
+        if return_type == 'db_row':
+            return new_row
+        elif return_type == 'score_list':
+            score_list = list_to_uint8_array(new_list[4:])
+            return score_list
+        raise ValueError("Unknown return type requested for user db entry")

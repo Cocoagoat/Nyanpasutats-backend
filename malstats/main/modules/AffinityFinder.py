@@ -4,12 +4,12 @@ try:
     import thread
 except ImportError:
     import _thread as thread
-from MAL_utils import Data
-from general_utils import time_at_current_point, timeit
+from main.modules.general_utils import time_at_current_point, timeit
 import numpy as np
+from main.modules.UserDB import UserDB
 import pyximport # Need this to import .pyx files
 pyximport.install(setup_args = {"include_dirs":np.get_include()}) # Need to manually include numpy or it won't work
-import gottagofasttest2
+from main.modules.gottagofasttest2 import count_common_shows, compute_affinity
 
 
 @timeit
@@ -29,48 +29,48 @@ def find_max_affinity(username, min_common_shows=20):
 
     def initial_user_prompt():
         while(True):
-            x = input(f"Current database size is {data.main_df.shape[0]}. Continue? Y/N")
-            if x=='Y':
+            x = input(f"Current database size is {user_db.main_df.shape[0]}. Continue? Y/N")
+            if x == 'Y':
                 return
-            if x=='N':
+            if x == 'N':
                 amount = int(input("Insert new database size"))
-                data.fill_main_database(amount)
+                user_db.fill_main_database(amount)
 
-    data = Data()
+    user_db = UserDB()
     # initial_user_prompt()
 
     t1 = perf_counter()
-    username_list = list(data.scores_dict.keys())
+    username_list = list(user_db.scores_dict.keys())
     try:
-        user_list = data.scores_dict[username]
+        user_list = user_db.scores_dict[username]
     except KeyError:
-        user_list = data.create_user_entry(username)
+        user_list = user_db.get_user_db_entry(username, return_type="score_list")
     affinities_list = []
 
     time_at_current_point(t1, "Start")
     print("Starting calculations")
 
-    for i in range(len(data.scores_dict)):
+    for i in range(len(user_db.scores_dict)):
         # This loop calculates the affinity between the main user and every score
         # list in the dictionary. This is done through Cythonized functions which
         # dramatically speed up the process (a must since we have 100k+ users to compare with)
 
-        comparison_list = data.scores_dict[username_list[i]]
-        common_shows = gottagofasttest2.count_common_shows2(user_list, comparison_list, len(user_list))
+        comparison_list = user_db.scores_dict[username_list[i]]
+        common_shows = count_common_shows(user_list, comparison_list, len(user_list))
 
         if common_shows > min_common_shows:
-            affinity = gottagofasttest2.compute_affinity2(user_list, comparison_list, len(user_list))
-            affinities_list.append((username_list[i], affinity, common_shows))
+            affinity = compute_affinity(user_list, comparison_list, len(user_list))
+            affinities_list.append([username_list[i], affinity, common_shows])
 
     for pair in affinities_list:
-        if np.isnan(pair[1]) or pair[1]==1:
+        if np.isnan(pair[1]) or pair[1] == 1:
             affinities_list.remove(pair)
             # Affinity of 1 = the main user is being compared to themselves, it's easier to remove
             # the duplicate here than check for user name every time when calculating. nan means
             # that it's mathematically impossible to calculate the affinity (denominator is 0).
 
     for pair in sorted(affinities_list, reverse=True, key=lambda x: x[1]):
-        if abs(pair[1])>0.6 or abs(pair[1])==0:
+        if abs(pair[1]) > 0.6 or abs(pair[1]) == 0:
             print(pair)
 
     affinity_percentages = [100*x[1] for x in affinities_list]

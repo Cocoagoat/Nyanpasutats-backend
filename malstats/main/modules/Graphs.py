@@ -1,10 +1,10 @@
-from .UserDB import UserDB
-from .AnimeDB import AnimeDB
-from .general_utils import *
+from main.modules.UserDB import UserDB
+from main.modules.AnimeDB import AnimeDB
+from main.modules.general_utils import *
 from igraph import Graph, summary, union
 import networkx as nx
 import matplotlib.pyplot as plt
-from .filenames import *
+from main.modules.filenames import *
 
 
 class Graphs:
@@ -15,13 +15,18 @@ class Graphs:
         to house and create on demand all the data structures that are used in this project."""
         if cls._instance is None:
             cls._instance = super().__new__(cls, *args, **kwargs)
+            cls._instance._all_graphs = None
+            cls._instance._related_shows = None
+            cls._instance.anime_db = AnimeDB()
+
         return cls._instance
 
     def __init__(self):
         # All properties are loaded on demand
-        self._all_graphs = None
-        self._related_shows = None
-        self.anime_db = AnimeDB()
+        pass
+        # self._all_graphs = None
+        # self._related_shows = None
+        # self.anime_db = AnimeDB()
 
     @property
     def all_graphs(self):
@@ -140,7 +145,7 @@ class Graphs:
             # that isn't in the partial database in the first place.
             return True
 
-        if relation_type in  ['other' | 'side_story' | 'spin_off']:  # add parent?
+        if relation_type in  ['other', 'side_story', 'spin_off']:  # add parent?
             # This is the most problematic case. MAL is very inconsistent with how it labels things
             # as "other", "side story" or "spin-off". The latter two are used almost interchangeably,
             # and "other" can be used for pretty much ANYTHING. Side stories/spin-offs, commercials,
