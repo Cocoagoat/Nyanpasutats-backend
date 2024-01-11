@@ -195,17 +195,7 @@ def get_user_MAL_list(user_name, full_list=True):
     # response = get_search_results(url)
     response = get_data(url)
     anime_list = response["data"]
-    # try:
-    #     anime_list = response["data"]
-    # except (TypeError, KeyError) as ex:
-    #     anime_list = []  # list is empty/private
-    #     print(response)
-    #     print(response.status_code)
-    #     print(ex)
-    #     if response.status_code == 403:
-    #         raise UserListPrivateError
-    #     else:
-    #         raise UserListFetchError
+
 
     # If the user has more than 1000 entries in their list, we will need separate API
     # calls for each thousand.

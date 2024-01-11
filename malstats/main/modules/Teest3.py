@@ -50,6 +50,7 @@ def main():
 
     stats = SeasonalStats(start_year=2017)
     test = stats.get_user_seasonal_stats("BaronBrixius")
+    # test2 = stats.get_user_seasonal_stats2("BaronBrixius")
     print(5)
     # aff_db = AffinityDB()
     # model=Model()

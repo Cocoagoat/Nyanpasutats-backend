@@ -1,9 +1,9 @@
 from .filenames import *
 from .MAL_utils import *
-# import django
-# import os
-# os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'malstats.malstats.settings')
-# django.setup()
+import django
+import os
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'animisc.settings')
+django.setup()
 from main.models import AnimeData
 
 
@@ -200,8 +200,7 @@ class AnimeDB:
                 stats_dict[show] = show_dict
         return stats_dict
 
-    @staticmethod
-    def generate_anime_DB(non_sequels_only=False):
+    def generate_anime_DB(self, non_sequels_only=False):
         """Creates the anime database which contains data (as defined in required_fields)
         on every show"""
 
@@ -255,10 +254,23 @@ class AnimeDB:
             title = anime["node"]["title"]
             anime_data_dict[title] = anime_data
 
+            try:
+                image_url = anime['node']['main_picture']['medium']
+            except KeyError:
+                image_url = ""
             # For now I only need the image url in SQLite form, everything else is only used
             # by internal scripts which are built for .parquet databases
-            new_entry = AnimeData(image_url=anime['node']['main_picture']['medium'])
-            new_entry.save()
+            # new_entry = AnimeData(image_url=anime['node']['main_picture']['medium'])
+            # anime_data = AnimeData.objects.get_or_create(name=title, image_url=image_url)
+
+            anime_data_for_db = anime_data + [title, image_url]
+            db_fields = ['mal_id', 'mean_score', 'scores', 'members', 'episodes', 'duration', 'type', 'year', 'season',
+                         'name', 'image_url']
+            anime_db_dict = dict(zip(db_fields, anime_data_for_db))
+            print(anime_db_dict)
+            AnimeData.objects.get_or_create(**anime_db_dict)
+
+            # new_entry.save()
 
             return title  # Title is returned to check whether we reached the last show
 
@@ -277,8 +289,11 @@ class AnimeDB:
 
         # The fields we need from the JSON object containing information about a single anime.
 
-        anime_data_dict = {'Rows': ['ID', 'Mean Score', 'Scores',
-                                    'Members', 'Episodes', 'Duration', 'Type', 'Year', 'Season']}
+        # anime_data_dict = {'Rows': ['ID', 'Mean Score', 'Scores',
+        #                             'Members', 'Episodes', 'Duration', 'Type', 'Year', 'Season']}
+
+        stat_names = list(self.stats.keys())
+        anime_data_dict = {'Rows': stat_names}
 
         page_num = 0
         while not last_show_reached:

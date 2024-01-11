@@ -38,7 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'malstats.main.apps.MainConfig',
+    'main.apps.MainConfig',
     'rest_framework',
     'frontend.apps.FrontendConfig',
     'corsheaders'
@@ -59,7 +59,13 @@ MIDDLEWARE = [
 
 CORS_ALLOW_ALL_ORIGINS = True
 
-ROOT_URLCONF = 'malstats.urls'
+ROOT_URLCONF = 'animisc.urls'
+
+REST_FRAMEWORK = {
+    'DEFAULT_RENDERER_CLASSES': [
+        'rest_framework.renderers.JSONRenderer',
+    ],
+}
 
 TEMPLATES = [
     {
@@ -77,7 +83,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'malstats.wsgi.application'
+WSGI_APPLICATION = 'animisc.wsgi.application'
 
 
 # Database
