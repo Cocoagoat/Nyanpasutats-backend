@@ -9,11 +9,12 @@ import pickle
 import pandas as pd
 from enum import Enum
 from polars.exceptions import SchemaFieldNotFoundError
-try:
-    import GenerateAccessToken as AccessToken
-except (ImportError, ModuleNotFoundError) as ex:
-    print(ex)
-    print("Warning : GenerateAccessToken not found")
+import main.modules.GenerateAccessToken as AccessToken
+# try:
+#     import GenerateAccessToken as AccessToken
+# except (ImportError, ModuleNotFoundError) as ex:
+#     print(ex)
+#     print("Warning : GenerateAccessToken not found")
 import logging
 import polars as pl
 import csv
@@ -512,7 +513,7 @@ def get_search_results(url, q=None):
             #     time.sleep(Sleep.LONG_SLEEP)
             #     response=get_search_results(url)
 
-        if response.status_code not in codes_to_check:
+        if not response.status_code or response.status_code not in codes_to_check:
             try:
                 logger.error(response.raise_for_status())
                 print("Unknown API Error, trying to sleep")

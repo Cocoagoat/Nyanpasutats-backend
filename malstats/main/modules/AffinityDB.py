@@ -396,6 +396,7 @@ class AffDBEntryCreator:
                 raise ValueError("shows_to_predict expects a value of either 'watched', 'unwatched', 'both' or 'all'.")
 
         self.aff_db_entry_dict = self.initialize_aff_db_dict(db_type, for_predict)
+        #optimize above
 
         self.user = self.user_affinity_calculator.get_user_affs()
         get_user_entry_list(shows_to_take)

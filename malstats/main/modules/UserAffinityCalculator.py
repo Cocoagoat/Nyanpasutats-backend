@@ -162,7 +162,10 @@ class UserAffinityCalculator:
             if not user_score or entry in processed_entries or entry.startswith('K-On!'):
                 continue
 
-            main_show = self.tags.entry_tags_dict[entry]['Main']
+            try:
+                main_show = self.tags.entry_tags_dict[entry]['Main']
+            except KeyError:
+                continue
             main_show_data = self.tags.show_tags_dict[main_show]
             user_watched_entries_length_coeffs = [x[1] for x in
                                                   main_show_data['Related'].items()

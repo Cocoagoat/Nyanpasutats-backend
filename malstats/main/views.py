@@ -13,19 +13,20 @@ from .modules.AffinityFinder import find_max_affinity
 from .modules.Errors import UserListFetchError
 from .modules.SeasonalStats import SeasonalStats
 from .models import AnimeData
+from .modules.UserDB import UserDB
 import logging
 import json
 from urllib.parse import unquote
 
 logger = logging.getLogger(__name__)
-
 # class MyDataView(APIView):
 #     def get(self, request, format=None):
 #         data = your_python_script_function()  # This returns a list or dictionary
 #         return Response(data)
 
-# current_dir = Path(__file__).parent
-# model = Model(model_filename=current_dir / "MLmodels" / current_model_name)
+current_dir = Path(__file__).parent
+model = Model(model_filename= current_dir / "MLmodels" / current_model_name)
+user_db = UserDB()
 
 
 @method_decorator(cache_page(60 * 60), name='dispatch')
@@ -39,15 +40,15 @@ class RecommendationsView(APIView):
         # current_dir = Path(__file__).parent
         # model = Model(model_filename=current_dir / "MLmodels" / current_model_name)
         try:
-            errors, recommendations = model.predict_scores(username, db_type=1)
+            predictions, predictions_no_watched = model.predict_scores(username, db_type=1)
         except UserListFetchError as e:
             return Response(e.message, status=e.status)
 
-        return Response({"Errors": errors, "Recommendations": recommendations})
+        return Response({"Recommendations": predictions, "RecommendationsNoWatched": predictions_no_watched})
     #turn responses to json later?
 
 
-@method_decorator(cache_page(60 * 60), name='dispatch')
+# @method_decorator(cache_page(60 * 60), name='dispatch')
 class SeasonalStatsView(APIView):
     @staticmethod
     def get(request):
@@ -55,10 +56,10 @@ class SeasonalStatsView(APIView):
         if not username:
             return Response("Username is required", status=400)
         try:
-            seasonal_dict = SeasonalStats.get_user_seasonal_stats(username)
+            seasonal_dict, seasonal_dict_no_sequels = SeasonalStats.get_user_seasonal_stats(username)
         except UserListFetchError as e:
             return Response(e.message, e.status)
-        return Response(seasonal_dict)
+        return Response({'Stats': seasonal_dict, 'StatsNoSequels': seasonal_dict_no_sequels})
 
 
 @method_decorator(cache_page(60 * 60), name='dispatch')
@@ -89,7 +90,7 @@ def get_anime_img_url(request):
 @api_view(('GET',))
 @renderer_classes((JSONRenderer,))
 def get_anime_img_urls(request):
-    show_names = unquote(request.GET.get('show_names', '[]'))
+    show_names = request.GET.get('show_names', '[]')
     print(show_names)
     logger.info(show_names)
     try:

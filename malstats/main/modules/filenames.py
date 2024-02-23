@@ -15,7 +15,7 @@ aff_db_path = data_path / "Partials"
 aff_db_filename = "AffinityDB"
 # The lack of extension is on purpose ^
 entry_tags_filename = data_path / "entry_tags_dict.pickle"
-entry_tags_filename2 = data_path / "entry_tags_dict2.pickle"
+entry_tags_filename2 = data_path / "entry_tags_dict101.pickle"
 shows_tags_filename = data_path / "shows_tags_dict.pickle"
 graphs_dict_filename = data_path / "all_graphs.pickle"
 relations_dict_filename = data_path / "anime_relations.pickle"

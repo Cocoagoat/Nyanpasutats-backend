@@ -133,6 +133,7 @@ class Model:
     def train(self):
 
         def interleave(files):
+            #  thanks chatgpt very cool
             return files.interleave(lambda file_path: tf.data.Dataset.from_generator(
                 self._generate_batch, args=[file_path], output_signature=(
                     tf.TensorSpec(shape=(self.batch_size, num_features), dtype=tf.float32),
@@ -730,28 +731,17 @@ class Model:
 
         # user_shows_df_with_name, normalized_df = self.get_user_db(user, shows_to_take, with_mean)
         user_shows_df_with_name = self.get_user_db(user, shows_to_take)
-        # user_shows_df = user_shows_df_with_name.drop('Show Name', axis=1)
 
-        # normalized_df = self.aff_db.normalize_aff_df(user_shows_df, for_predict=True)
-        # normalized_df = normalized_df.fillna(0)
-        #
-        # if not with_mean:
-        #     normalized_df = normalized_df.drop('Show Score', axis=1)
-        #     normalized_df = AffinityDB.filter_df_for_model(normalized_df)
-
-        # model = tf.keras.models.load_model(models_path / self.model_filename)
-        # predictions, predictions_no_watched = self.fetch_predictions(normalized_df,
-        #                                                              user_shows_df_with_name,
-        #                                                             user, user_row, shows_to_take)
-
-        # user_row = user_row.to_dict(as_series=False) # temporary
-        # user_row = {entry: score[0] for entry, score in user_row.items()}
         predictions, predictions_no_watched = self.fetch_predictions(user_shows_df_with_name,
                                                                      user, user_row, shows_to_take)
-        errors = self.calculate_error(predictions, user.mean_of_watched)
-        errors = [error if not np.isnan(error) else 0 for error in errors]
 
-        return errors, predictions
+        predictions_sorted_by_diff = sorted(predictions, reverse=True, key=lambda x:(x['PredictedScore'] - x['MALScore']))
+
+        predictions_no_watched_by_diff = sorted(predictions_no_watched, key=lambda x: (x['PredictedScore'] - x['MALScore']))
+        # errors = self.calculate_error(predictions, user.mean_of_watched)
+        # errors = [error if not np.isnan(error) else 0 for error in errors]
+
+        return predictions[0:400], predictions_sorted_by_diff[0:400]
 
     # def calculate_mean_pred_deviation(self):
     #     average_predicted_scores = {show_name: 0 for show_name in self.tags.show_tags_dict.keys()}

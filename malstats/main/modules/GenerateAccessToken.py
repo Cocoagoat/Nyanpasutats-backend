@@ -1,6 +1,6 @@
 import requests
 import sys
-from filenames import data_path
+from main.modules.filenames import data_path
 # Client_details.txt must contain your MAL client ID on the first line,
 # and your MAL client secret on the second line.
 try:

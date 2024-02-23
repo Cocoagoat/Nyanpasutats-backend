@@ -12,6 +12,17 @@ from main.modules.Errors import UserListPrivateError
 
 
 class UserDB:
+    """This class creates UserDB.parquet and holds all relevant functions and information
+    regarding it. Current fields (columns) :
+
+    - Index
+    - Username
+    - Mean Score
+    - Scored Shows
+    - One column for each show that exists as a column in AnimeDB.
+
+    An example database is shown in the class definition itself.
+    """
     _instance = None
 
 #     "───────┬────────────┬──────────┬────────────┬───┬──────────┬────────────┬────────────┬────────────┐
@@ -56,7 +67,6 @@ class UserDB:
         pass
         # All properties are loaded on demand
 
-
     stats = ["Index", "Username", "Mean Score", "Scored Shows"]
 
     @property
@@ -66,24 +76,8 @@ class UserDB:
             # return (input("Continue filling database? Y/N") == 'Y')
             return False
 
-
         """Polars database (stored as .parquet), contains username
         + mean score + scored shows + all the scores of each user in it."""
-        # if not isinstance(self._df, pl.DataFrame):
-        #     try:
-        #         print("Loading user database")
-        #         self._df = pl.read_parquet(user_database_name)
-        #         continue_filling = (input("Continue filling database? Y/N") == 'Y')
-        #         if continue_filling:
-        #             amount = int(input("Insert the desired amount of users\n"))
-        #             self.fill_main_database(amount)
-        #
-        #     except FileNotFoundError:
-        #         print("User database not found. Creating new user database")
-        #         self._df = pl.DataFrame(schema=self.schema_dict)
-        #         amount = int(input("Insert the desired amount of users\n"))
-        #         self.fill_main_database(amount)
-        # return self._df
         if not isinstance(self._df, pl.DataFrame):
             file_loaded = False
 
@@ -111,17 +105,7 @@ class UserDB:
         else:
             raise ValueError("df must be a Polars database")
 
-    # @property
-    # def filtered_df(self):
-    #     if not isinstance(self._filtered_df, pl.DataFrame):
-    #         df_dict = self.df.to_dict(as_series=False)
-    #         titles = [title for title, show_stats in df_dict.items()
-    #                                    if title!='Rows' and
-    #                                    self.show_meets_conditions(show_stats)]
-    #         _filtered_df = self.df.select(titles)
-    #     return _filtered_df
-
-    def split_df(self,parts):
+    def split_df(self, parts):
         print("Beginning to split main database")
         df_size = len(self.df)
         part_size = int(df_size/parts)
@@ -149,7 +133,7 @@ class UserDB:
     @property
     def scores_dict(self):
         """A dictionary which holds the usernames of everyone in the database as keys,
-        and their respective score arrays as values. Saved in a pickle file.
+        and their respective score arrays as uint8 values. Saved in a pickle file.
         Exists to significantly speed up real-time computation - working with the
         Polars database would require casting and slicing during computation."""
 
@@ -228,7 +212,7 @@ class UserDB:
     def blacklist(self):
         """List of all users that didn't meet the requirements to have their lists
         in the database. Stored here to avoid wasting an API request on checking
-        their lists again."""
+        their lists again when their usernames are encountered."""
         if not self._blacklist:
             print("Loading blacklist")
             try:
@@ -376,7 +360,7 @@ class UserDB:
         # that basically either put everything in their list, or are score-boosting alts with many shows.
         # The update table of a very popular show like Attack on Titan on the other hand, will include many
         # people that have just started watching anime, and thus only have a few shows in their list + score-boosting
-        # alts for those shows specifically. Since the program runs for weeks, we want to avoid wasting time
+        # alts for those shows specifically. Since the program runs for days, we want to avoid wasting time
         # on filtering those as much as possible.
 
         # @timeit
@@ -391,10 +375,10 @@ class UserDB:
         # ------------------------------ Main function starts here ----------------------------
 
         scores_db_dict = {}
-        """This dictionary exists as temporary storage for user lists. Instead creating a new polars row
-        and adding it to the database as we get it, we add it to this dictionary. Then, each
-        save_data_per entries, we convert that dictionary to a Polars dataframe and concatenate
-        it with the main one. This results in significant speedup."""
+        """This dictionary exists as temporary storage for user lists. Instead of creating a new
+         polars row and adding it to the database as we get it, we add it to this dictionary. 
+         Then, each save_data_per entries, we convert that dictionary to a Polars dataframe and
+         concatenate it with the main one. This results in significant speedup."""
 
         current_users = len(self.MAL_users_list)
 
@@ -439,8 +423,7 @@ class UserDB:
 
                     if user_name not in self.MAL_users_list and user_name not in self.blacklist:
 
-                        if user_name.startswith('ishinashi'):
-                            logger.debug("Retard troll detected, continuing on")
+                        if user_name.startswith('ishinashi'):  # Anti-troll measures, remove later
                             continue
                         try:
                             user_anime_list = get_user_MAL_list(user_name, full_list=False)

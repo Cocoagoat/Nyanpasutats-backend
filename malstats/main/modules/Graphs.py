@@ -5,6 +5,7 @@ from igraph import Graph, summary, union
 import networkx as nx
 import matplotlib.pyplot as plt
 from main.modules.filenames import *
+import os
 
 
 class Graphs:
@@ -203,7 +204,10 @@ class Graphs:
             count = count + 1
 
             for graph in new_graphs:
-                main_show = self.determine_main_show(graph)
+                try:
+                    main_show = self.determine_main_show(graph)
+                except:
+                    print(f"ERROR, the affected shows are : {graph.vs['name']}")
                 new_graph_dict[main_show] = graph
 
         new_graph_dict = sorted(new_graph_dict.items(), key=lambda x: len(x[1].vs['name']),
@@ -214,9 +218,12 @@ class Graphs:
 
     def determine_main_show(self, G):
         """The main show for each graph will be the one with the most members (to avoid graphs
-        having a "Attack on Titan : Snickers Collab" key)"""
+        having an "Attack on Titan : Snickers Collab" key)"""
+
         members_of_each_show = self.anime_db.get_stats_of_shows(G.vs['name'], ['Scores'])
+        # Return the entry which the maximum amount of people watched out of all related entries
         return max(members_of_each_show, key=lambda x: members_of_each_show[x]['Scores'])
+
 
     def find_related_entries(self, show_name):
         if show_name in self.related_shows.keys():
@@ -231,7 +238,6 @@ class Graphs:
 
     def create_graph_of_all_anime(self):  # Main function
 
-        self._all_graphs = {}
 
         def traverse_anime_relations(anime_id: int, G: Graph):
 
@@ -258,14 +264,17 @@ class Graphs:
 
             fail_count = 0
             # current_anime = call_function_through_process(get_search_results, url)
+            # put this in separate function
             current_anime = None
             while not current_anime:
                 try:
-                    time.sleep(1.2)
                     current_anime = get_search_results(url)
+                    time.sleep(1.2)
                 except (TimeoutError, requests.exceptions.ReadTimeout) as e:
                     logger.debug(e)
                     current_anime = None
+                except UserDoesNotExistError:
+                    return
 
             # Add filter for getting none because 404 garbage
             while current_anime is None:  # turn this into decorator later, also change the None to not what we want
@@ -321,9 +330,23 @@ class Graphs:
                     print(f"Deleting graph. Graph's vertices are {G.vs['name']}")
                     logger.debug(f"Deleting graph. Graph's vertices are {G.vs['name']}")
 
+                if len(self._all_graphs) % 20 == 0 or MAL_title == relevant_ids_titles[-1][1]:
+                    save_pickled_file(data_path / "temp_all_graphs.pickle", self._all_graphs)
+
         # ------------------ Main function starts here ------------------
 
-        processed_anime = []
+        # if os.path.exists(data_path / "graphs_processed_anime.pickle"):
+        #     processed_anime = load_pickled_file(data_path / "graphs_processed_anime.pickle")
+        # else:
+        #     processed_anime = []
+
+        if os.path.exists(data_path / "temp_all_graphs.pickle"):
+            self._all_graphs = load_pickled_file(data_path / "temp_all_graphs.pickle")
+        else:
+            self._all_graphs = {}
+
+        processed_anime = list(set([x for G in list(self._all_graphs.values()) for x in G.vs['name']]))
+
 
         partial_df_dict = self.anime_db.partial_df.to_dict(as_series=False)
         del partial_df_dict['Rows']
@@ -345,6 +368,8 @@ class Graphs:
 
             G = Graph(directed=True)
             traverse_anime_relations(ID, G)
+            if len(G.vs) == 0:
+                continue
 
             if 'delet dis' not in G.vs['name']:
                 self._all_graphs[MAL_title] = G
@@ -354,8 +379,8 @@ class Graphs:
                 G.delete_vertices("delet dis")
                 self._all_graphs[root] = G
 
-            if len(self._all_graphs) % 20 == 0:
-                save_pickled_file("test_graph_final3.pickle", self._all_graphs)
+            if len(self._all_graphs) % 5 == 0 or MAL_title == relevant_ids_titles[-1][1]:
+                save_pickled_file(data_path / "temp_all_graphs.pickle", self._all_graphs)
 
         self._all_graphs = self.split_graphs(self._all_graphs)
 

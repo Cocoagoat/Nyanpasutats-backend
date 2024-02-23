@@ -5,6 +5,7 @@ from multiprocessing import freeze_support
 import polars as pl
 from main.modules.general_utils import find_duplicates
 from main.modules.filenames import *
+from main.modules.Tags import Tags
 from main.modules.general_utils import save_pickled_file, load_pickled_file
 from main.modules.AffinityDB import AffinityDB
 import random
@@ -47,9 +48,13 @@ def main():
     # aff_db.create_minor_parts((4,10))
     # data = aff_db.get_means_of_OG_affs()
     # save_pickled_file(data_path / "general_data.pickle", data)
-
-    stats = SeasonalStats(start_year=2017)
-    test = stats.get_user_seasonal_stats("BaronBrixius")
+    tags = Tags()
+    test = tags.show_tags_dict
+    current_dir = Path(__file__).parent.parent
+    model = Model(model_filename = current_dir / "MLmodels" / current_model_name)
+    # stats = SeasonalStats()
+    test = model.predict_scores("Dr_Jan_Itor")
+    # test = stats.get_user_seasonal_stats("BaronBrixius")
     # test2 = stats.get_user_seasonal_stats2("BaronBrixius")
     print(5)
     # aff_db = AffinityDB()

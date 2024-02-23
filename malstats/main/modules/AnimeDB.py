@@ -8,6 +8,22 @@ from main.models import AnimeData
 
 
 class AnimeDB:
+    """This class creates AnimeDB.parquet and holds all relevant functions and information
+    regarding it. Current fields :
+
+    - ID
+    - Mean Score
+    - Scores (how many users scored the show)
+    - Members (how many users have the show in their list)
+    - Episodes
+    - Duration (of each episode)
+    - Type (see MediaTypes)
+    - Year
+    - Season
+
+    Note : The above-mentioned fields are rows, not columns, for easier synchronization with UserDB.
+
+    """
     _instance = None
 
     # ┌──────┬────────────┬────────────┬───────────┬───┬──────────┬────────────┬────────────┬────────────┐
@@ -66,8 +82,6 @@ class AnimeDB:
 
     @property
     def df(self):
-        """Database with info on all the anime that's listed (and ranked) on MAL.
-        Fields are as shown in the "required_fields" variable of generate_anime_DB."""
         if not isinstance(self._df, pl.DataFrame):
             try:
                 print("Loading anime database")
@@ -84,8 +98,8 @@ class AnimeDB:
         if not isinstance(self._partial_df, pl.DataFrame):
             df_dict = self.df.to_dict(as_series=False)
             titles = [title for title, show_stats in df_dict.items()
-                                       if title!='Rows' and
-                                       self.show_meets_conditions(show_stats)]
+                                       if (title!='Rows' and
+                                       self.show_meets_conditions(show_stats))]
             _partial_df = self.df.select(["Rows"] + titles)
         return _partial_df
 
@@ -169,6 +183,8 @@ class AnimeDB:
                 show_stats[self.stats["Episodes"]] >= 15\
                 and show_stats[self.stats["Duration"]]>=2\
                 and show_stats[self.stats["Mean Score"]]>=6.5:
+                # and show_stats[self.stats["Year"]]>=2021 \
+                # and show_stats[self.stats["Year"]]<=2022:
             return True
         return False
 
@@ -201,8 +217,6 @@ class AnimeDB:
         return stats_dict
 
     def generate_anime_DB(self, non_sequels_only=False):
-        """Creates the anime database which contains data (as defined in required_fields)
-        on every show"""
 
         def create_anime_DB_entry(anime):
             # Helper function, creates a list which will later serve as a column in the anime DB.
@@ -329,5 +343,3 @@ class AnimeDB:
             page_num += 1
         table = pa.Table.from_pydict(anime_data_dict)
         pq.write_table(table, anime_database_name)  # This creates a .parquet file from the dict
-        # if self._main_df:
-        #     synchronize_main_dbs()

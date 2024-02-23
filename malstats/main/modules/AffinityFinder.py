@@ -6,6 +6,7 @@ except ImportError:
     import _thread as thread
 from main.modules.general_utils import time_at_current_point, timeit
 import numpy as np
+from collections import defaultdict
 from main.modules.UserDB import UserDB
 import pyximport # Need this to import .pyx files
 pyximport.install(setup_args = {"include_dirs":np.get_include()}) # Need to manually include numpy or it won't work
@@ -15,8 +16,8 @@ from main.modules.gottagofasttest2 import count_common_shows, compute_affinity
 @timeit
 def find_max_affinity(username, min_common_shows=20):
     """This function iterates over rows in the database and calculates the affinity
-    # between the user provided and each person (unless a limit is given) in the database.
-    # The affinity is calculated via Pearson's Correlation Coefficient.
+    between the user provided and each person (unless a limit is given) in the database.
+    The affinity is calculated via Pearson's Correlation Coefficient.
 
         Parameters :
 
@@ -27,17 +28,16 @@ def find_max_affinity(username, min_common_shows=20):
                      amount of users in the database, the entire database will be iterated
                      over."""
 
-    def initial_user_prompt():
-        while(True):
-            x = input(f"Current database size is {user_db.main_df.shape[0]}. Continue? Y/N")
-            if x == 'Y':
-                return
-            if x == 'N':
-                amount = int(input("Insert new database size"))
-                user_db.fill_main_database(amount)
+    # def initial_user_prompt():
+    #     while(True):
+    #         x = input(f"Current database size is {user_db.main_df.shape[0]}. Continue? Y/N")
+    #         if x == 'Y':
+    #             return
+    #         if x == 'N':
+    #             amount = int(input("Insert new database size"))
+    #             user_db.fill_main_database(amount)
 
     user_db = UserDB()
-    # initial_user_prompt()
 
     t1 = perf_counter()
     username_list = list(user_db.scores_dict.keys())
@@ -45,41 +45,47 @@ def find_max_affinity(username, min_common_shows=20):
         user_list = user_db.scores_dict[username]
     except KeyError:
         user_list = user_db.get_user_db_entry(username, return_type="score_list")
-    affinities_list = []
+
+    affinities_list = defaultdict()
 
     time_at_current_point(t1, "Start")
     print("Starting calculations")
+    pos_aff_count = 0
+    neg_aff_count = 0
+    avg_aff = 0
 
     for i in range(len(user_db.scores_dict)):
         # This loop calculates the affinity between the main user and every score
         # list in the dictionary. This is done through Cythonized functions which
         # dramatically speed up the process (a must since we have 100k+ users to compare with)
-
+        if username_list[i] == username:
+            continue
         comparison_list = user_db.scores_dict[username_list[i]]
         common_shows = count_common_shows(user_list, comparison_list, len(user_list))
 
         if common_shows > min_common_shows:
             affinity = compute_affinity(user_list, comparison_list, len(user_list))
-            affinities_list.append([username_list[i], affinity, common_shows])
+            if np.isnan(affinity):
+                continue
+            affinities_list[username_list[i]] = {'Affinity': round(affinity*100,2), 'CommonShows': common_shows}
 
-    for pair in affinities_list:
-        if np.isnan(pair[1]) or pair[1] == 1:
-            affinities_list.remove(pair)
-            # Affinity of 1 = the main user is being compared to themselves, it's easier to remove
-            # the duplicate here than check for user name every time when calculating. nan means
-            # that it's mathematically impossible to calculate the affinity (denominator is 0).
+            if affinity > 0:
+                pos_aff_count += 1
+            elif affinity < 0:
+                neg_aff_count += 1
+            avg_aff += affinity*100
 
-    for pair in sorted(affinities_list, reverse=True, key=lambda x: x[1]):
-        if abs(pair[1]) > 0.6 or abs(pair[1]) == 0:
-            print(pair)
+    user_count = len(affinities_list)
+    avg_aff /= user_count
 
-    affinity_percentages = [100*x[1] for x in affinities_list]
-    amount_of_people = len(affinities_list)
-    positive_affinity = len([x for x in affinity_percentages if x > 0])
-    negative_affinity = len([x for x in affinity_percentages if x < 0])
-    zero_affinity = amount_of_people - positive_affinity - negative_affinity
+    sorted_aff_dict_items = sorted(affinities_list.items(), reverse=True, key=lambda x: x[1]['Affinity'])
+    pos_affinities = {user: user_dict for user, user_dict in sorted_aff_dict_items[0:50]}
+    neg_affinities = {user: user_dict for user, user_dict in sorted_aff_dict_items[-1:-51:-1]}
+    zero_affinity = user_count - pos_aff_count - neg_aff_count
 
-    print(f"Your average affinity is : {round(np.mean(affinity_percentages),2)}%")
-    print(f"Positive affinity : {positive_affinity},{round(100 * positive_affinity / amount_of_people, 2)}%")
-    print(f"Negative affinity : {negative_affinity},{round(100 * negative_affinity / amount_of_people, 2)}%")
-    print(f"Zero affinity count : {zero_affinity},{round(100 * zero_affinity/ amount_of_people, 2)}%")
+    print(f"Your average affinity is : {avg_aff}%")
+    print(f"Positive affinity : {pos_aff_count},{round(100 * pos_aff_count / user_count, 2)}%")
+    print(f"Negative affinity : {neg_aff_count},{round(100 * neg_aff_count / user_count, 2)}%")
+    print(f"Zero affinity count : {zero_affinity},{round(100 * zero_affinity/ user_count, 2)}%")
+
+    return {'PositiveAffs' : pos_affinities, 'NegativeAffs' :  neg_affinities}

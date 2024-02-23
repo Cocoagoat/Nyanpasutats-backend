@@ -7,6 +7,13 @@ from sortedcollections import OrderedSet
 
 
 class Tags:
+    """This class holds various data structures related to Anilist tags. Main data structures :
+
+    - entry_tags_dict - An object containing information about each show in AnimeDB.partial_df (each show that passes the popularity and score thresholds defined there)
+
+    - show_tags_dict - An object containing information about each show considered to be a MAIN show (non-sequel) as decided by the Graphs module. See shows_tags_dict definition for more details.
+
+    """
     _instance = None
 
     query = '''
@@ -74,6 +81,8 @@ class Tags:
             # except FileNotFoundError:
             #     cls._instance.data = GeneralData().generate_data()
             cls._instance.tag_types = ["Single", "Double"]
+            data = load_pickled_file(data_path / "general_data.pickle")
+            cls.tags_to_include = data.OG_aff_means.keys()
         return cls._instance
 
     def __init__(self):
@@ -120,6 +129,8 @@ class Tags:
     def all_anilist_tags(self):
         if not self._all_anilist_tags:
             self._all_anilist_tags = self.all_single_tags + self.all_genres + self.all_studios + self.all_doubletags
+            self._all_anilist_tags = [x for x in self._all_anilist_tags if x in self.tags_to_include]
+            #remove after debugging
         return self._all_anilist_tags
 
     @property
@@ -226,7 +237,7 @@ class Tags:
         for show, show_dict in self.entry_tags_dict.items():
             if 'Tags' in show_dict:
                 for tag_dict in show_dict['Tags']:
-                    if tag_dict['name'] not in banned_tags:
+                    if tag_dict['name'] not in banned_tags and tag_dict['name'] in self.tags_to_include:
                         tags.add(tag_dict['name'])
         return list(tags)
 
@@ -256,6 +267,8 @@ class Tags:
             if 'Genres' in show_dict.keys():
                 for genre in show_dict['Genres']:
                     genres.add(genre)
+
+        genres = [x for x in genres if x in self.tags_to_include]
         return list(genres)
 
     def get_full_studios_list(self):
@@ -274,6 +287,8 @@ class Tags:
         for studio, amount_of_shows in studio_dict.items():
             if amount_of_shows >= 30 or studio in extra_studios:
                 studios.add(studio)
+
+        studios = [x for x in studios if x in self.tags_to_include]
         return list(studios)
 
     def get_full_doubletags_list(self, sorted=False):
@@ -286,6 +301,7 @@ class Tags:
         else:
             double_tag_counts = self.get_double_tag_counts(only_relevant=True)
             double_tags = double_tag_counts.keys()
+        double_tags = [x for x in double_tags if x in self.tags_to_include]
         return list(double_tags)
 
     def get_double_tag_counts(self, only_relevant=True):
@@ -352,22 +368,40 @@ class Tags:
             return rec_dict
 
         def get_shows_from_page(page_num):
-            variables = {"page": page_num, "isAdult": False}
-
-            response_received = False
-            while not response_received:
+            def fetch_response():
                 try:
-                    response = requests.post(url, json={"query": self.query, "variables": variables}, timeout=15).json()
-                    response_received = True
+                    response = requests.post(url, json={"query": self.query, "variables": variables}, timeout=30).json()
+                    time.sleep(3)
+                    return response
                 except requests.exceptions.ReadTimeout:
                     print("Request timed out, retrying")
-                    continue
-            time.sleep(1.5)
-            try:
-                show_list = response["data"]["Page"]["media"]
-                has_next_page = response["data"]["Page"]["pageInfo"]["hasNextPage"]
-            except:
-                print("5")
+                    return
+
+            variables = {"page": page_num, "isAdult": False}
+
+            ok_response_received = False
+            while not ok_response_received:
+                response = False
+                while not response:
+                    response = fetch_response()
+
+                try:
+                    show_list = response["data"]["Page"]["media"]
+                    has_next_page = response["data"]["Page"]["pageInfo"]["hasNextPage"]
+                    ok_response_received = True
+                except:
+                    print(response)
+                    try:
+                        error_code = response['error'][0]['status']
+                    except (IndexError, KeyError):
+                        error_code = response['error']['status']
+                    if error_code != 999:
+                        print(f"Error. Error code is {error_code}. Sleeping 300 seconds.")
+                        time.sleep(300)
+                    else:
+                        show_list = []
+                        has_next_page = False
+                        ok_response_received = True  # last page
             return show_list, has_next_page
 
         def get_entry_data(entry):
@@ -389,7 +423,7 @@ class Tags:
                 entry_data = {
                     "Tags": [{"name": tag["name"], "percentage": self.adjust_tag_percentage(tag["rank"]),
                               "category": tag["category"]} for tag in entry["tags"]
-                             if tag["rank"] >= 60 and tag['name'] not in banned_tags],
+                             if tag["rank"] >= 60 and tag['name'] not in banned_tags and tag['name'] in tags_to_include],
                     "Genres": entry["genres"],
                     "Studio": entry["studios"]["nodes"][0]["name"] if entry["studios"]["nodes"] else None,
                     "Recommended": show_recommendations,
@@ -399,6 +433,8 @@ class Tags:
                 return title, entry_data
 
         anime_db = AnimeDB()
+        data = load_pickled_file(data_path / "general_data.pickle")
+        tags_to_include = data.OG_aff_means.keys()
         banned_tags = self.get_banned_tags()
         # with open("NSFWTags.txt", 'r') as file:
         #     # Banned tags are mostly NSFW stuff that doesn't exist in regular shows
@@ -408,6 +444,7 @@ class Tags:
         has_next_page = True
         page_num = 1
         relevant_shows = anime_db.partial_df.columns
+
 
         # First, we create entry_tags_dict. This dictionary has the tag-related details of each RELEVANT
         # entry (with relevance defined in anime_db.partial_df, basically not too short and not TOO obscure)
