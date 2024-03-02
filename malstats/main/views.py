@@ -12,11 +12,14 @@ from django.http import JsonResponse
 from .modules.AffinityFinder import find_max_affinity
 from .modules.Errors import UserListFetchError
 from .modules.SeasonalStats import SeasonalStats
-from .models import AnimeData
+from .tasks import get_user_seasonal_stats_task, get_user_recommendations
+from .models import AnimeData, TaskQueue
 from .modules.UserDB import UserDB
 import logging
 import json
 from urllib.parse import unquote
+from celery.result import AsyncResult
+
 
 logger = logging.getLogger(__name__)
 # class MyDataView(APIView):
@@ -24,9 +27,28 @@ logger = logging.getLogger(__name__)
 #         data = your_python_script_function()  # This returns a list or dictionary
 #         return Response(data)
 
-current_dir = Path(__file__).parent
-model = Model(model_filename= current_dir / "MLmodels" / current_model_name)
+
 user_db = UserDB()
+
+
+def get_task_data(request):
+    task_id = request.GET.get('task_id')
+    task_result = AsyncResult(task_id)
+
+    if task_result.ready():
+        result = task_result.get()
+        try:
+            task = TaskQueue.objects.get(task_id=task_id)
+            task.delete()
+        except TaskQueue.DoesNotExist:
+            print("Task not found.")
+        return JsonResponse({'status': 'completed', 'data': result}, status=200)
+    else:
+        return JsonResponse({'status': 'pending'}, status=202)
+
+
+def get_queue_position(request):
+    return JsonResponse({'queuePosition': len(TaskQueue.objects.all())}, status=200)
 
 
 @method_decorator(cache_page(60 * 60), name='dispatch')
@@ -37,14 +59,21 @@ class RecommendationsView(APIView):
         if not username:
             return Response({"error": "Username is required"}, status=400)
 
+        task = get_user_recommendations.delay(username)
+        TaskQueue.objects.create(task_id=task.id)
+        task_position = len(TaskQueue.objects.all())
+        return Response({'taskId': task.id,
+                         'queuePosition': task_position},
+                        status=202)
+
         # current_dir = Path(__file__).parent
         # model = Model(model_filename=current_dir / "MLmodels" / current_model_name)
-        try:
-            predictions, predictions_no_watched = model.predict_scores(username, db_type=1)
-        except UserListFetchError as e:
-            return Response(e.message, status=e.status)
-
-        return Response({"Recommendations": predictions, "RecommendationsNoWatched": predictions_no_watched})
+        # try:
+        #     predictions, predictions_no_watched = model.predict_scores(username, db_type=1)
+        # except UserListFetchError as e:
+        #     return Response(e.message, status=e.status)
+        #
+        # return Response({"Recommendations": predictions, "RecommendationsNoWatched": predictions_no_watched})
     #turn responses to json later?
 
 
@@ -55,11 +84,20 @@ class SeasonalStatsView(APIView):
         username = request.query_params.get('username')
         if not username:
             return Response("Username is required", status=400)
-        try:
-            seasonal_dict, seasonal_dict_no_sequels = SeasonalStats.get_user_seasonal_stats(username)
-        except UserListFetchError as e:
-            return Response(e.message, e.status)
-        return Response({'Stats': seasonal_dict, 'StatsNoSequels': seasonal_dict_no_sequels})
+
+        task = get_user_seasonal_stats_task.delay(username)
+        TaskQueue.objects.create(task_id=task.id)
+        task_position = len(TaskQueue.objects.all())
+
+        return Response({'taskId': task.id,
+                        'queuePosition': task_position},
+                        status=202)
+        # try:
+        #
+        #     seasonal_dict, seasonal_dict_no_sequels = SeasonalStats.get_user_seasonal_stats(username)
+        # except UserListFetchError as e:
+        #     return Response(e.message, e.status)
+        # return Response({'Stats': seasonal_dict, 'StatsNoSequels': seasonal_dict_no_sequels})
 
 
 @method_decorator(cache_page(60 * 60), name='dispatch')

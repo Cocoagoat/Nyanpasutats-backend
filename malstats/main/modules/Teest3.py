@@ -1,3 +1,5 @@
+import sys
+print(sys.path)
 from main.modules.Model import Model
 from main.modules.GeneralData import GeneralData
 from pathlib import Path
@@ -6,11 +8,15 @@ import polars as pl
 from main.modules.general_utils import find_duplicates
 from main.modules.filenames import *
 from main.modules.Tags import Tags
+from main.models import TaskQueue
+from main.tasks import get_user_seasonal_stats_task
 from main.modules.general_utils import save_pickled_file, load_pickled_file
 from main.modules.AffinityDB import AffinityDB
 import random
 from main.modules.AffinityFinder import find_max_affinity
 from main.modules.SeasonalStats import SeasonalStats
+from animisc.celery import app
+
 
 
 # def train_model_ensemble():
@@ -48,12 +54,19 @@ def main():
     # aff_db.create_minor_parts((4,10))
     # data = aff_db.get_means_of_OG_affs()
     # save_pickled_file(data_path / "general_data.pickle", data)
-    tags = Tags()
-    test = tags.show_tags_dict
+    # tags = Tags()
+    # test = tags.show_tags_dict
+    # task_id = 'the-task-id'
+    # task_result = app.AsyncResult(task_id)
+    # print('Task status:', task_result.status)
+    # print('Task result:', task_result.result)
+    # task = get_user_seasonal_stats_task.delay("BaronBrixius")
+    # test = TaskQueue.objects.all()
+    print(10)
     current_dir = Path(__file__).parent.parent
     model = Model(model_filename = current_dir / "MLmodels" / current_model_name)
     # stats = SeasonalStats()
-    test = model.predict_scores("Dr_Jan_Itor")
+    test = model.predict_scores("Archdruidman")
     # test = stats.get_user_seasonal_stats("BaronBrixius")
     # test2 = stats.get_user_seasonal_stats2("BaronBrixius")
     print(5)

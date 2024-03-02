@@ -13,4 +13,6 @@ urlpatterns = [
     path("seasonal/", views.SeasonalStatsView.as_view(), name="seasonal"),
     path("img_url/", views.get_anime_img_url, name="img_url"),
     path("img_urls/", views.get_anime_img_urls, name="img_urls"),
+    path('tasks/', views.get_task_data, name='tasks'),
+    path('queue_pos/', views.get_queue_position, name='queue_pos')
 ]

@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_celery_results',
     'main.apps.MainConfig',
     'rest_framework',
     'frontend.apps.FrontendConfig',
@@ -56,6 +57,13 @@ MIDDLEWARE = [
     'django.middleware.cache.UpdateCacheMiddleware',
     'django.middleware.cache.FetchFromCacheMiddleware',
 ]
+
+CELERY_BROKER_URL = 'amqp://guest:guest@localhost'
+CELERY_RESULT_BACKEND = 'django-db'
+CELERY_TIMEZONE = 'UTC'
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_EXPIRES = 360
+# CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
 
 CORS_ALLOW_ALL_ORIGINS = True
 
@@ -121,7 +129,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = CELERY_TIMEZONE
 
 USE_I18N = True
 

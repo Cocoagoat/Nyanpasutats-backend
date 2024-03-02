@@ -18,6 +18,18 @@ class AnimeData(models.Model):
         return self.name
 
 
+class TaskQueue(models.Model):
+    task_id = models.CharField(max_length=50, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, default='pending')
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return self.task_id
+
+
 
 
 

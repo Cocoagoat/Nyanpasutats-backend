@@ -28,6 +28,7 @@ class Model:
                  layers=3, neuron_start=1024, neuron_lower=[False, False], neuron_double=[False,False], algo="Adam", lr=0.002,
                  loss='mean_absolute_error', epochs=50, reg=0.001):
 
+        tf.config.set_visible_devices([], 'GPU')
         self.model_filename = model_filename
         self.model = tf.keras.models.load_model(models_path / self.model_filename)
         # self.model_type = model_type
@@ -582,7 +583,8 @@ class Model:
             features = normalized_df.iloc[:, :-1].values
 
         predictions = self.model.predict(features)
-        predictions = [x[0] for x in predictions]
+        print("Right after predict")
+        predictions = [min(10, float(x[0])) for x in predictions]
         # normalized_predictions = (predictions - np.mean(predictions)) / np.std(predictions)
         # normalized_df['Predictions'] = normalized_predictions
         # dev_features = normalized_df.values
@@ -676,6 +678,7 @@ class Model:
 
         new_predictions_list = sorted(new_predictions_list, key=lambda x: x['PredictedScore'], reverse=True)
         new_predictions_list_no_watched = [x for x in new_predictions_list if not x['UserScore']]
+        print("Right after formatting")
         return new_predictions_list, new_predictions_list_no_watched
 
     @staticmethod
@@ -735,12 +738,13 @@ class Model:
         predictions, predictions_no_watched = self.fetch_predictions(user_shows_df_with_name,
                                                                      user, user_row, shows_to_take)
 
+        print("Left fetch_predictions")
         predictions_sorted_by_diff = sorted(predictions, reverse=True, key=lambda x:(x['PredictedScore'] - x['MALScore']))
 
         predictions_no_watched_by_diff = sorted(predictions_no_watched, key=lambda x: (x['PredictedScore'] - x['MALScore']))
         # errors = self.calculate_error(predictions, user.mean_of_watched)
         # errors = [error if not np.isnan(error) else 0 for error in errors]
-
+        print("Before returning from predict_scores")
         return predictions[0:400], predictions_sorted_by_diff[0:400]
 
     # def calculate_mean_pred_deviation(self):

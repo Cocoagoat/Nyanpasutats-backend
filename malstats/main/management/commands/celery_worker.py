@@ -1,24 +1,25 @@
-import shlex
-import subprocess
 from django.core.management.base import BaseCommand
 from django.utils import autoreload
+import shlex
+import subprocess
 
 
-def restart_celery():
-    cmd = 'pkill -f "celery worker"'
+def restart_celery(concurrency):
+    cmd = f'pkill -f "celery worker"'
     subprocess.call(shlex.split(cmd))
-    cmd = 'celery worker -A django_celery_example --loglevel=info'
+    cmd = f'celery -A animisc worker --loglevel=info --concurrency={concurrency}'
+    print(shlex.split(cmd))
     subprocess.call(shlex.split(cmd))
 
 
 class Command(BaseCommand):
-    help = "Restarts a Celery worker, use after updating code"
+    help = "Restarts the Celery worker with the specified concurrency"
+
+    def add_arguments(self, parser):
+        # Named (optional) argument
+        parser.add_argument('concurrency', nargs='?', type=int, default=4, help='The number of concurrent workers')
 
     def handle(self, *args, **options):
-        print('Starting celery worker with autoreload...')
-
-        # For Django>=2.2
-        autoreload.run_with_reloader(restart_celery)
-
-        # For django<2.1
-        # autoreload.main(restart_celery)
+        concurrency = options['concurrency']
+        print(f'Starting celery workerr with autoreload and concurrency {concurrency}...')
+        autoreload.run_with_reloader(lambda: restart_celery(concurrency))
