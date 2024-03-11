@@ -88,4 +88,4 @@ def find_max_affinity(username, min_common_shows=20):
     print(f"Negative affinity : {neg_aff_count},{round(100 * neg_aff_count / user_count, 2)}%")
     print(f"Zero affinity count : {zero_affinity},{round(100 * zero_affinity/ user_count, 2)}%")
 
-    return {'PositiveAffs' : pos_affinities, 'NegativeAffs' :  neg_affinities}
+    return pos_affinities, neg_affinities

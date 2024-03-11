@@ -200,7 +200,7 @@ class SeasonalStats:
 
         sorted_seasonal_stats = {season: stats for season, stats in sorted(seasonal_dict.items(),
                                                                  key=lambda x: x[1]['AvgScore'],
-                                                                 reverse=True) if stats['Shows'] >= 5}
+                                                                 reverse=True) if stats['ScoredShows'] >= 5}
 
         # for season in seasonal_dict.keys():
         #     seasonal_dict[season]['FavoritesAvgScore'] = calculate_average_score_of_season(sorted_seasonal_stats,season)
@@ -223,7 +223,7 @@ class SeasonalStats:
         # sorted_by_favs_seasonal_stats = sorted(seasonal_dict.items(), key=lambda x: x[1]['FavoritesAvgScore'],
         #                                        reverse=True)
 
-        sorted_by_favs_seasonal_stats = {season: stats for season, stats in sorted(seasonal_dict.items(),
+        sorted_by_favs_seasonal_stats = {season: stats for season, stats in sorted(sorted_seasonal_stats.items(),
                                                                            key=lambda x: x[1]['FavoritesAvgScore'],
                                                                            reverse=True)}
 

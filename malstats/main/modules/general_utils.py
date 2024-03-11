@@ -8,6 +8,8 @@ import time
 import pickle
 import pandas as pd
 from enum import Enum
+from functools import wraps
+from .GlobalValues import CACHE_TIMEOUT
 from polars.exceptions import SchemaFieldNotFoundError
 import main.modules.GenerateAccessToken as AccessToken
 # try:
@@ -27,8 +29,10 @@ try:
 except ImportError:
     import _thread as thread
 from colorama import Fore
+from django.core.cache import cache
 from polars.exceptions import ColumnNotFoundError
 from main.modules.filenames import *
+from django.conf import settings
 from main.modules.Errors import UserListPrivateError, UserDoesNotExistError, UserListFetchError
 # from .AffinityDB import GeneralData
 # from . import AffinityDB
@@ -44,10 +48,7 @@ class ErrorCauses(Enum):
     BAD_REQUEST = "BAD_REQUEST"
 
 
-logging.basicConfig(level=logging.WARNING, filename=data_path /'Test.log', filemode='a',
-                    format="[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s")  #
-logger = logging.getLogger('MALRecommendations')
-logger.setLevel(level=logging.DEBUG)
+
 
 
 class UnknownServerException(Exception):
@@ -688,3 +689,46 @@ def print_attributes(obj):
             value = getattr(obj, attr)
             print(f"{attr} : {str(value)[:50]}")
 
+
+def is_redis_cache():
+    # Access the backend of the default cache
+    backend = settings.CACHES['default']['BACKEND']
+
+    # Check if the backend is set to django_redis.cache.RedisCache
+    return 'django_redis.cache.RedisCache' in backend
+
+
+def redis_cache_wrapper(timeout):
+    def decorator(function):
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            print("Entering cache decorator")
+            cache_key = f"{function.__name__}_{'_'.join(str(arg) for arg in args)}_{'_'.join(f'{key}_{value}' for key, value in kwargs.items())}"
+            print("Cache key is", cache_key)
+            result = cache.get(cache_key)
+            if result is not None:
+                return result
+            print("Entering function")
+            result = function(*args, **kwargs)
+
+            if not (type(result) == 'dict' and 'error' in result.keys()):
+                print("No error found, caching the result")
+                cache.set(cache_key, result, timeout)
+            return result
+        return wrapped
+    return decorator
+
+
+# def cache_result_in_redis(function):
+#     def inner(*args, **kwargs):
+#         cache_key = f"{function.__name__}_{'_'.join(str(arg) for arg in args)}_{'_'.join(f'{key}_{value}' for key, value in kwargs.items())}"
+#
+#         result = cache.get(cache_key)
+#         if result is not None:
+#             return result
+#
+#         result = function(*args, **kwargs)
+#
+#         cache.set(cache_key, result, CACHE_TIMEOUT)
+#         return result
+#     return inner

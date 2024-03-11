@@ -673,7 +673,7 @@ class Model:
 
             show_single_tags = [d['name'] for d in self.tags.show_tags_dict[show_name]['Tags']]\
                                                   + self.tags.show_tags_dict[show_name]['Genres']
-            predictions_per_show['Tags'] = show_single_tags
+            # predictions_per_show['Tags'] = show_single_tags
             new_predictions_list.append(predictions_per_show)
 
         new_predictions_list = sorted(new_predictions_list, key=lambda x: x['PredictedScore'], reverse=True)

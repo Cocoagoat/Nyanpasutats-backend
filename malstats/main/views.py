@@ -1,8 +1,11 @@
+import time
+
 from .modules.Model import Model
 from pathlib import Path
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from .modules.filenames import current_model_name
+from django.core.cache import cache
 from rest_framework.decorators import api_view, renderer_classes
 from rest_framework.renderers import JSONRenderer, TemplateHTMLRenderer
 from django.views.decorators.cache import cache_page
@@ -12,16 +15,18 @@ from django.http import JsonResponse
 from .modules.AffinityFinder import find_max_affinity
 from .modules.Errors import UserListFetchError
 from .modules.SeasonalStats import SeasonalStats
-from .tasks import get_user_seasonal_stats_task, get_user_recommendations
-from .models import AnimeData, TaskQueue
+from .tasks import get_user_seasonal_stats_task, get_user_recs_task, get_user_affs_task
+from .models import AnimeData, TaskQueue, UsernameCache
 from .modules.UserDB import UserDB
 import logging
 import json
+from .modules.Log_config import *
+import pdb
 from urllib.parse import unquote
 from celery.result import AsyncResult
 
 
-logger = logging.getLogger(__name__)
+view_logger = logging.getLogger('Nyanpasutats.view')
 # class MyDataView(APIView):
 #     def get(self, request, format=None):
 #         data = your_python_script_function()  # This returns a list or dictionary
@@ -29,9 +34,16 @@ logger = logging.getLogger(__name__)
 
 
 user_db = UserDB()
+CACHE_TIMEOUT = 3600
+TASK_TIMEOUT = 3600
 
 
-def get_task_data(request):
+def delete_task(task_id):
+    task = TaskQueue.objects.get(task_id=task_id)
+    task.delete()
+
+
+def get_task_data2(request):
     task_id = request.GET.get('task_id')
     task_result = AsyncResult(task_id)
 
@@ -42,16 +54,49 @@ def get_task_data(request):
             task.delete()
         except TaskQueue.DoesNotExist:
             print("Task not found.")
+            view_logger.error("Task not found")
+
         return JsonResponse({'status': 'completed', 'data': result}, status=200)
     else:
         return JsonResponse({'status': 'pending'}, status=202)
 
 
+def get_task_data(request):
+    print("Entered get task data")
+    task_id = request.GET.get('task_id')
+    task_result = AsyncResult(task_id)
+    time_elapsed = 0
+    # pdb.set_trace()
+    while time_elapsed < TASK_TIMEOUT:
+        if task_result.ready():
+            try:
+                # pdb.set_trace()
+                result = task_result.get()
+                delete_task(task_id)
+                if type(result) == dict and 'error' in result.keys():
+                    return JsonResponse({'status': 'error', 'data': result['error']}, status=result['status'])
+                return JsonResponse({'status': 'completed', 'data': result}, status=200)
+            except TaskQueue.DoesNotExist:
+                print("Task not found.")
+                # Find a better way to handle task not found in queue case
+                return JsonResponse({'status': 'error', 'data': 'Task not found.'}, status=400)
+        time.sleep(1)
+        time_elapsed += 1
+        if time_elapsed % 120 == 0:
+            view_logger.warning(f"Warning - Task {task_id} is incomplete after {time_elapsed/60} minutes.")
+
+    view_logger.error(f"Error - Task was unable to complete on time.")
+    delete_task(task_id)
+    print(1)
+    return JsonResponse({'status': 'error',
+                             'data': 'Task was unable to complete on time.'}, status=500)
+
+
 def get_queue_position(request):
-    return JsonResponse({'queuePosition': len(TaskQueue.objects.all())}, status=200)
+    return JsonResponse({'queuePosition': (len(TaskQueue.objects.all()) + 1)}, status=200)
 
 
-@method_decorator(cache_page(60 * 60), name='dispatch')
+# @method_decorator(cache_page(60 * 60), name='dispatch')
 class RecommendationsView(APIView):
     @staticmethod
     def get(request):
@@ -59,22 +104,15 @@ class RecommendationsView(APIView):
         if not username:
             return Response({"error": "Username is required"}, status=400)
 
-        task = get_user_recommendations.delay(username)
+        task = get_user_recs_task.delay(username)
         TaskQueue.objects.create(task_id=task.id)
-        task_position = len(TaskQueue.objects.all())
-        return Response({'taskId': task.id,
-                         'queuePosition': task_position},
-                        status=202)
+        # task_position = len(TaskQueue.objects.all())
 
-        # current_dir = Path(__file__).parent
-        # model = Model(model_filename=current_dir / "MLmodels" / current_model_name)
-        # try:
-        #     predictions, predictions_no_watched = model.predict_scores(username, db_type=1)
-        # except UserListFetchError as e:
-        #     return Response(e.message, status=e.status)
-        #
-        # return Response({"Recommendations": predictions, "RecommendationsNoWatched": predictions_no_watched})
-    #turn responses to json later?
+        UsernameCache.objects.get_or_create(username=username)
+        print(f"Returning response with taskId of {task.id} from RecommendationsView")
+        return Response({'taskId': task.id},
+                         # 'queuePosition': task_position},
+                        status=202)
 
 
 # @method_decorator(cache_page(60 * 60), name='dispatch')
@@ -87,17 +125,13 @@ class SeasonalStatsView(APIView):
 
         task = get_user_seasonal_stats_task.delay(username)
         TaskQueue.objects.create(task_id=task.id)
-        task_position = len(TaskQueue.objects.all())
+        # task_position = len(TaskQueue.objects.all())
 
-        return Response({'taskId': task.id,
-                        'queuePosition': task_position},
+        UsernameCache.objects.get_or_create(username=username)
+        print(f"Returning response with taskId of {task.id} from SeasonalStatsView")
+        return Response({'taskId': task.id},
+                        # 'queuePosition': task_position},
                         status=202)
-        # try:
-        #
-        #     seasonal_dict, seasonal_dict_no_sequels = SeasonalStats.get_user_seasonal_stats(username)
-        # except UserListFetchError as e:
-        #     return Response(e.message, e.status)
-        # return Response({'Stats': seasonal_dict, 'StatsNoSequels': seasonal_dict_no_sequels})
 
 
 @method_decorator(cache_page(60 * 60), name='dispatch')
@@ -107,11 +141,15 @@ class AffinityFinderView(APIView):
         username = request.query_params.get('username')
         if not username:
             return Response("Username is required", status=400)
-        try:
-            affinities = find_max_affinity(username)
-        except UserListFetchError as e:
-            return Response(e.message, e.status)
-        return Response(affinities)
+
+        task = get_user_affs_task.delay(username)
+        TaskQueue.objects.create(task_id=task.id)
+
+        UsernameCache.objects.get_or_create(username=username)
+        print(f"Returning response with taskId of {task.id} from AffinityFinderView")
+        return Response({'taskId': task.id},
+                        # 'queuePosition': task_position},
+                        status=202)
 
 
 @api_view(('GET',))
@@ -130,7 +168,7 @@ def get_anime_img_url(request):
 def get_anime_img_urls(request):
     show_names = request.GET.get('show_names', '[]')
     print(show_names)
-    logger.info(show_names)
+    view_logger.info(show_names)
     try:
         show_names_list = json.loads(show_names)
     except json.JSONDecodeError:
@@ -155,6 +193,18 @@ def get_anime_img_urls(request):
         return Response(image_urls)
     except AnimeData.DoesNotExist:
         return Response("One or more of the shows requested does not exist.", status=400)
+
+
+def username_cache_view(request):
+    username = request.GET.get('username')
+    user_list = UsernameCache.objects.values_list('username', flat=True)
+    print(user_list)
+    print(username)
+    if username in user_list:
+        return JsonResponse({'UserFound': True})
+    else:
+        UsernameCache.objects.create(username=username)
+        return JsonResponse({'UserFound': False})
 
 
 # def index(request, id):

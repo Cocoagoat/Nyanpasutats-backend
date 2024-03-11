@@ -8,6 +8,8 @@ import datetime
 import time
 import pandas as pd
 from enum import Enum
+from django.core.cache import cache
+from .GlobalValues import CACHE_TIMEOUT
 import logging
 import csv
 import pyarrow as pa
@@ -18,6 +20,8 @@ try:
     import thread
 except ImportError:
     import _thread as thread
+
+
 from operator import itemgetter
 from colorama import Fore
 # from sortedcollections import OrderedSet
@@ -91,7 +95,7 @@ def get_usernames_from_show(base_url):
         page_users_table = []
         url = f"{base_url}show={str(75 * page_num)}"
         print(f"Getting usernames from {url}")
-        logger.debug(f"Getting usernames from {url}")
+        # logger.debug(f"Getting usernames from {url}")
         page_html = get_search_results(url)
         try:
             soup = BeautifulSoup(page_html.text, "html.parser")
@@ -104,7 +108,7 @@ def get_usernames_from_show(base_url):
                 # flag being 1 means we got an error twice in a row,
                 # most likely an issue with too many requests
                 print("Too many requests, commencing sleep then trying again")
-                logger.debug("Too many requests, commencing sleep then trying again")
+                # logger.debug("Too many requests, commencing sleep then trying again")
                 time.sleep(Sleep.LONG_SLEEP)
             else:
                 base_url = f"{base_url}m=all&"
@@ -148,7 +152,7 @@ def get_anime_batch_from_jikan(page_num):
         # for failure would be the API itself being down, in which case we just wait for it
         # to come back up.
         print("Anime batch was returned as None, sleeping and retrying")
-        logger.debug("Anime batch was returned as None, sleeping and retrying")
+        # logger.debug("Anime batch was returned as None, sleeping and retrying")
         time.sleep(Sleep.MEDIUM_SLEEP)
         anime_batch = call_function_through_process(get_search_results, url)
     return anime_batch
@@ -168,7 +172,7 @@ def get_anime_batch_from_MAL(page_num, required_fields):
         # for failure would be the API itself being down, in which case we just wait for it
         # to come back up.
         print("Anime batch was returned as None, sleeping and retrying")
-        logger.debug("Anime batch was returned as None, sleeping and retrying")
+        # logger.debug("Anime batch was returned as None, sleeping and retrying")
         time.sleep(Sleep.MEDIUM_SLEEP)
         # anime_batch = call_function_through_process(get_search_results, url)
         anime_batch = get_search_results(url)
@@ -184,10 +188,17 @@ def count_scored_shows(user_list):
     return count
 
 
-# @timeit
+@timeit
+@redis_cache_wrapper(timeout=5*60)
 def get_user_MAL_list(user_name, full_list=True):
     """Helper function of fill_list_database. Gets the full list of one MAL user via their username.
     If full_list is false, it'll stop once it gets to the shows with no score"""
+
+    # cache_key = f'user_list_{user_name}'
+    # cached_result = cache.get(cache_key)
+    # if cached_result:
+    #     return cached_result
+
     url = f'https://api.myanimelist.net/v2/users/' \
           f'{user_name}/animelist?fields=list_status&limit=1000&sort=list_score&nsfw=True'
 
@@ -208,9 +219,6 @@ def get_user_MAL_list(user_name, full_list=True):
             print(
                 f'Length of {user_name}\'s anime list exceeds {1000 * thousands}, '  #
                 f'proceeding to next 1000 shows')
-            logger.debug(
-                f'Length of {user_name}\'s anime list exceeds {1000 * thousands}, '
-                f'proceeding to next 1000 shows')
             url = f'https://api.myanimelist.net/v2/users/' \
                   f'{user_name}/animelist?fields=list_status&limit=1000&sort' \
                   f'=list_score' \
@@ -221,6 +229,7 @@ def get_user_MAL_list(user_name, full_list=True):
             thousands += 1
             scored_shows = count_scored_shows(anime_list)
 
+    # cache.set(cache_key, anime_list, CACHE_TIMEOUT)
     return anime_list
 
 

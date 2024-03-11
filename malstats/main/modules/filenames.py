@@ -1,6 +1,7 @@
 from pathlib import Path
 current_dir = Path(__file__).parent
 data_path = current_dir.parent / 'data'
+logging_path = current_dir.parent / 'logging'
 models_path = current_dir.parent / 'MLmodels'
 model_filename_suffix = "RSDD"
 current_model_name = "T1-4-50-RSDD.h5"

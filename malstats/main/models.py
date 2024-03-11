@@ -30,6 +30,9 @@ class TaskQueue(models.Model):
         return self.task_id
 
 
+class UsernameCache(models.Model):
+    username = models.CharField(max_length=30, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 

@@ -63,10 +63,10 @@ def main():
     # task = get_user_seasonal_stats_task.delay("BaronBrixius")
     # test = TaskQueue.objects.all()
     print(10)
-    current_dir = Path(__file__).parent.parent
-    model = Model(model_filename = current_dir / "MLmodels" / current_model_name)
-    # stats = SeasonalStats()
-    test = model.predict_scores("Archdruidman")
+    # current_dir = Path(__file__).parent.parent
+    # model = Model(model_filename = current_dir / "MLmodels" / current_model_name)
+    # # stats = SeasonalStats()
+    test = SeasonalStats.get_user_seasonal_stats("KuroHaruto")
     # test = stats.get_user_seasonal_stats("BaronBrixius")
     # test2 = stats.get_user_seasonal_stats2("BaronBrixius")
     print(5)

@@ -58,7 +58,8 @@ MIDDLEWARE = [
     'django.middleware.cache.FetchFromCacheMiddleware',
 ]
 
-CELERY_BROKER_URL = 'amqp://guest:guest@localhost'
+# CELERY_BROKER_URL = 'amqp://guest:guest@localhost'
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
 CELERY_RESULT_BACKEND = 'django-db'
 CELERY_TIMEZONE = 'UTC'
 CELERY_TASK_SERIALIZER = 'json'
@@ -102,6 +103,17 @@ DATABASES = {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
     }
+}
+
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://localhost:6379/1',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        },
+    },
 }
 
 
