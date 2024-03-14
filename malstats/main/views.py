@@ -24,6 +24,7 @@ from .modules.Log_config import *
 import pdb
 from urllib.parse import unquote
 from celery.result import AsyncResult
+from django.db.utils import OperationalError
 
 
 view_logger = logging.getLogger('Nyanpasutats.view')
@@ -49,12 +50,12 @@ def get_task_data2(request):
 
     if task_result.ready():
         result = task_result.get()
-        try:
-            task = TaskQueue.objects.get(task_id=task_id)
-            task.delete()
-        except TaskQueue.DoesNotExist:
-            print("Task not found.")
-            view_logger.error("Task not found")
+        # try:
+        #     task = TaskQueue.objects.get(task_id=task_id)
+        #     task.delete()
+        # except TaskQueue.DoesNotExist:
+        #     print("Task not found.")
+        #     view_logger.error("Task not found")
 
         return JsonResponse({'status': 'completed', 'data': result}, status=200)
     else:
@@ -68,25 +69,31 @@ def get_task_data(request):
     time_elapsed = 0
     # pdb.set_trace()
     while time_elapsed < TASK_TIMEOUT:
-        if task_result.ready():
-            try:
-                # pdb.set_trace()
-                result = task_result.get()
-                delete_task(task_id)
-                if type(result) == dict and 'error' in result.keys():
-                    return JsonResponse({'status': 'error', 'data': result['error']}, status=result['status'])
-                return JsonResponse({'status': 'completed', 'data': result}, status=200)
-            except TaskQueue.DoesNotExist:
-                print("Task not found.")
-                # Find a better way to handle task not found in queue case
-                return JsonResponse({'status': 'error', 'data': 'Task not found.'}, status=400)
+        try:
+            if task_result.ready():
+                try:
+                    # pdb.set_trace()
+                    result = task_result.get()
+                    # delete_task(task_id)
+                    if type(result) == dict and 'error' in result.keys():
+                        return JsonResponse({'status': 'error', 'data': result['error']}, status=result['status'])
+                    return JsonResponse({'status': 'completed', 'data': result}, status=200)
+                except TaskQueue.DoesNotExist:
+                    print("Task not found.")
+                    # Find a better way to handle task not found in queue case
+                    return JsonResponse({'status': 'error', 'data': 'Task not found.'}, status=400)
+        except OperationalError:
+            view_logger.error("Caught Operational Error")
         time.sleep(1)
         time_elapsed += 1
         if time_elapsed % 120 == 0:
             view_logger.warning(f"Warning - Task {task_id} is incomplete after {time_elapsed/60} minutes.")
 
     view_logger.error(f"Error - Task was unable to complete on time.")
-    delete_task(task_id)
+    try:
+        delete_task(task_id)
+    except TaskQueue.DoesNotExist:
+        view_logger.error(f"Unable to delete task {task_id}")
     print(1)
     return JsonResponse({'status': 'error',
                              'data': 'Task was unable to complete on time.'}, status=500)

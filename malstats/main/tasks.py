@@ -2,11 +2,13 @@ from .modules.Model import Model
 from pathlib import Path
 from django.core.cache import cache
 from .modules.filenames import current_model_name
-from celery import shared_task
+from celery import shared_task, Task
+from animisc.celery import app
 from .modules.general_utils import redis_cache_wrapper
 from .modules.SeasonalStats import SeasonalStats  # Assuming the logic resides here
 from .modules.Errors import UserListFetchError
 from .modules.AffinityFinder import find_max_affinity
+from .models import TaskQueue
 import logging
 
 
@@ -18,7 +20,49 @@ CACHE_TIMEOUT = 3600
 view_logger = logging.getLogger('Nyanpasutats.view')
 
 
-@shared_task
+# def delete_task(task_id):
+#     task = TaskQueue.objects.get(task_id=task_id)
+#     task.delete()
+
+
+class MyTask(Task):
+    def on_success(self, retval, task_id, args, kwargs):
+        print("Task success")
+        try:
+            print("Attempting to delete task ", task_id)
+            self.delete_task(task_id)
+        except TaskQueue.DoesNotExist:
+            print(f"Unable to delete task {task_id}")
+            view_logger.error(f"Unable to delete task {task_id}")
+
+    def on_task_failure(self, retval, task_id, args, kwargs):
+        print("Task failed")
+        try:
+            self.delete_task(task_id)
+        except TaskQueue.DoesNotExist:
+            print(f"Unable to delete task {task_id}")
+            view_logger.error(f"Unable to delete task {task_id}")
+
+    @staticmethod
+    def delete_task(task_id):
+        print(f"Fetching task {task_id} to delete")
+        task = TaskQueue.objects.get(task_id=task_id)
+        print("Deleting task",task)
+        task.delete()
+
+
+# def on_task_success(result, *args, **kwargs):
+#     def on_task_success(result, *args, **kwargs):
+#         print("Task success")
+#         print(result, *args, **kwargs)
+#
+#
+# def on_task_failure(result, *args, **kwargs):
+#     print("Task failed")
+#     print(result, *args, **kwargs)
+
+
+@shared_task(base=MyTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
 def get_user_seasonal_stats_task(username):
     print("Entering seasonal task")
@@ -33,13 +77,15 @@ def get_user_seasonal_stats_task(username):
         # cache.set(cache_key, result, 60) # test this
         return {'error': e.message, 'status': e.status}
     except Exception as e:
+        if not e.status:
+            e.status = 400
         # I know this is bad practice, but in case of an unexpected error in fetching
         # an individual user's stats, we do not want the site to crash.
         logging.error(f"An unexpected error has occurred. {e.status} {e.message}")
         return {'error': e.message, 'status': e.status}
 
 
-@shared_task
+@shared_task(base=MyTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
 def get_user_recs_task(username):
     print("Entering recommendations task")
@@ -56,11 +102,13 @@ def get_user_recs_task(username):
     except UserListFetchError as e:
         return {'error': e.message, 'status': e.status}
     except Exception as e:
+        if not e.status:
+            e.status = 400
         logging.error(f"An unexpected error has occurred. {e.message}")
         return {'error': e.message, 'status': e.status}
 
 
-@shared_task
+@shared_task(base=MyTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
 def get_user_affs_task(username):
     print("Entering affinities task")
@@ -71,5 +119,7 @@ def get_user_affs_task(username):
     except UserListFetchError as e:
         return {'error': e.message, 'status': e.status}
     except Exception as e:
+        if not e.status:
+            e.status = 400
         logging.error(f"An unexpected error has occurred. {e.status} {e.message}")
         return {'error': e.message, 'status': e.status}

@@ -1,4 +1,5 @@
 from django.db import models
+from .model_managers import RetryManager
 
 
 class AnimeData(models.Model):
@@ -17,6 +18,8 @@ class AnimeData(models.Model):
     def __str__(self):
         return self.name
 
+    objects = RetryManager()  # To avoid I/O conflicts from concurrent requests since we're using SQLite
+
 
 class TaskQueue(models.Model):
     task_id = models.CharField(max_length=50, unique=True)
@@ -29,10 +32,14 @@ class TaskQueue(models.Model):
     def __str__(self):
         return self.task_id
 
+    objects = RetryManager()
+
 
 class UsernameCache(models.Model):
     username = models.CharField(max_length=30, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = RetryManager()
 
 
 

@@ -48,9 +48,6 @@ class ErrorCauses(Enum):
     BAD_REQUEST = "BAD_REQUEST"
 
 
-
-
-
 class UnknownServerException(Exception):
     pass
 
@@ -75,7 +72,6 @@ class Sleep:
 
 class DjangoUnpickler(pickle.Unpickler):
     def find_class(self, module, name):
-        logger.error(f"Attempting to unpickle {module}.{name}")
         if module == "modules.GeneralData":
             module = "main.modules.GeneralData"
         return super().find_class(module, name)

@@ -189,7 +189,7 @@ def count_scored_shows(user_list):
 
 
 @timeit
-@redis_cache_wrapper(timeout=5*60)
+# @redis_cache_wrapper(timeout=5*60)
 def get_user_MAL_list(user_name, full_list=True):
     """Helper function of fill_list_database. Gets the full list of one MAL user via their username.
     If full_list is false, it'll stop once it gets to the shows with no score"""
