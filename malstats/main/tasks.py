@@ -94,11 +94,13 @@ def get_user_recs_task(username):
         print("Initializing model")
         model = Model(model_filename=current_dir / "MLmodels" / current_model_name)
     try:
-        predictions, predictions_sorted_by_diff = model.predict_scores(username, db_type=1)
+        predictions, predictions_sorted_by_diff, fav_tags, least_fav_tags = model.predict_scores(username, db_type=1)
         print("After returning from predict_scores")
         # predictions = predictions.astype(float)
         return {'Recommendations': predictions,
-                'RecommendationsSortedByDiff': predictions_sorted_by_diff}
+                'RecommendationsSortedByDiff': predictions_sorted_by_diff,
+                'FavTags': fav_tags,
+                'LeastFavTags': least_fav_tags}
     except UserListFetchError as e:
         return {'error': e.message, 'status': e.status}
     except Exception as e:

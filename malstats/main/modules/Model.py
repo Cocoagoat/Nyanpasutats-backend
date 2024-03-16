@@ -720,6 +720,7 @@ class Model:
 
     def predict_scores(self, user_name, db_type=1):
 
+
         with_mean = False
         shows_to_take = "all"
         # shows_to_take="all"
@@ -735,6 +736,13 @@ class Model:
         # user_shows_df_with_name, normalized_df = self.get_user_db(user, shows_to_take, with_mean)
         user_shows_df_with_name = self.get_user_db(user, shows_to_take)
 
+        least_fav_tags = [Tags.format_doubletag(key) for key, value in sorted(user.tag_affinity_dict.items(),
+                                                        key=lambda x: (x[1] + 2 * user.tag_pos_affinity_dict[x[0]]))[
+                                                 0:20]]
+
+        fav_tags = [Tags.format_doubletag(key) for key, value in sorted(user.tag_affinity_dict.items(), reverse=True,
+                                                  key=lambda x: (x[1] + 2 * user.tag_pos_affinity_dict[x[0]]))[0:20]]
+
         predictions, predictions_no_watched = self.fetch_predictions(user_shows_df_with_name,
                                                                      user, user_row, shows_to_take)
 
@@ -745,7 +753,7 @@ class Model:
         # errors = self.calculate_error(predictions, user.mean_of_watched)
         # errors = [error if not np.isnan(error) else 0 for error in errors]
         print("Before returning from predict_scores")
-        return predictions[0:400], predictions_sorted_by_diff[0:400]
+        return predictions[0:400], predictions_sorted_by_diff[0:400], fav_tags, least_fav_tags
 
     # def calculate_mean_pred_deviation(self):
     #     average_predicted_scores = {show_name: 0 for show_name in self.tags.show_tags_dict.keys()}

@@ -50,3 +50,14 @@ class RetryManager(models.Manager):
                 if attempt + 1 == retries:
                     raise
                 time.sleep(delay)
+
+    def delete(self, *args, retries=50, delay=1, **kwargs):
+        for attempt in range(retries):
+            try:
+                print(f"Deleting {args, kwargs}")
+                return super().delete(*args, **kwargs)
+            except OperationalError:
+                view_logger.error("Caught Operational Error")
+                if attempt + 1 == retries:
+                    raise
+                time.sleep(delay)

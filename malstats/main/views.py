@@ -1,5 +1,8 @@
 import time
 
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+
 from .modules.Model import Model
 from pathlib import Path
 from rest_framework.views import APIView
@@ -15,10 +18,12 @@ from django.http import JsonResponse
 from .modules.AffinityFinder import find_max_affinity
 from .modules.Errors import UserListFetchError
 from .modules.SeasonalStats import SeasonalStats
+from .modules.MAL_utils import get_anime_id_by_name, get_search_results
 from .tasks import get_user_seasonal_stats_task, get_user_recs_task, get_user_affs_task
 from .models import AnimeData, TaskQueue, UsernameCache
 from .modules.UserDB import UserDB
 import logging
+import requests
 import json
 from .modules.Log_config import *
 import pdb
@@ -210,8 +215,35 @@ def username_cache_view(request):
     if username in user_list:
         return JsonResponse({'UserFound': True})
     else:
-        UsernameCache.objects.create(username=username)
+        # UsernameCache.objects.create(username=username)
         return JsonResponse({'UserFound': False})
+
+
+@require_POST
+@csrf_exempt
+def update_image_url_view(request):
+    data = json.loads(request.body)
+    print(data)
+    show_name = data.get('show_name')
+    print(show_name)
+    try:
+        existing_show_data = AnimeData.objects.get(name=show_name)
+    except AnimeData.DoesNotExist:
+        return JsonResponse({'added': False, 'error': 'Show does not exist'}, status=400)
+
+    show_id = existing_show_data.mal_id
+    existing_image_url = existing_show_data.image_url
+    image_exists = requests.head(existing_image_url)
+    if not image_exists:
+        url = f'https://api.myanimelist.net/v2/anime/{show_id}?fields=main_picture'
+        MAL_show_data = get_search_results(url)
+        image_url = MAL_show_data['main_picture']['medium']
+        existing_show_data.image_url = image_url
+        existing_show_data.save()
+        return JsonResponse({'added': True})
+    return JsonResponse({'added': False})
+
+
 
 
 # def index(request, id):

@@ -16,6 +16,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import polars as pl
 from random import shuffle
+import django
+django.setup()
+from main.models import AnimeData
 try:
     import thread
 except ImportError:
@@ -142,20 +145,20 @@ def check_account_age_directly(user_name):
     return time_since_account_creation
 
 
-def get_anime_batch_from_jikan(page_num):
-    """Utility function to get a batch of 25 shows from the Jikan API. Only exists because
-    it sometimes throws weird errors which require us to retry so that we don't skip any shows"""
-    url = f'https://api.jikan.moe/v4/top/anime?page={page_num}'
-    anime_batch = call_function_through_process(get_search_results, url)
-    while anime_batch is None:
-        # We keep retrying until we get the batch, the URL is correct so the main reason
-        # for failure would be the API itself being down, in which case we just wait for it
-        # to come back up.
-        print("Anime batch was returned as None, sleeping and retrying")
-        # logger.debug("Anime batch was returned as None, sleeping and retrying")
-        time.sleep(Sleep.MEDIUM_SLEEP)
-        anime_batch = call_function_through_process(get_search_results, url)
-    return anime_batch
+# def get_anime_batch_from_jikan(page_num):
+#     """Utility function to get a batch of 25 shows from the Jikan API. Only exists because
+#     it sometimes throws weird errors which require us to retry so that we don't skip any shows"""
+#     url = f'https://api.jikan.moe/v4/top/anime?page={page_num}'
+#     anime_batch = call_function_through_process(get_search_results, url)
+#     while anime_batch is None:
+#         # We keep retrying until we get the batch, the URL is correct so the main reason
+#         # for failure would be the API itself being down, in which case we just wait for it
+#         # to come back up.
+#         print("Anime batch was returned as None, sleeping and retrying")
+#         # logger.debug("Anime batch was returned as None, sleeping and retrying")
+#         time.sleep(Sleep.MEDIUM_SLEEP)
+#         anime_batch = call_function_through_process(get_search_results, url)
+#     return anime_batch
 
 
 def get_anime_batch_from_MAL(page_num, required_fields):
@@ -188,11 +191,17 @@ def count_scored_shows(user_list):
     return count
 
 
+def get_anime_id_by_name(show_name):
+    try:
+        show_data = AnimeData.objects.get(name=show_name)
+        return show_data.mal_id
+    except AnimeData.DoesNotExist:
+        return -1
+
+
 @timeit
 # @redis_cache_wrapper(timeout=5*60)
 def get_user_MAL_list(user_name, full_list=True):
-    """Helper function of fill_list_database. Gets the full list of one MAL user via their username.
-    If full_list is false, it'll stop once it gets to the shows with no score"""
 
     # cache_key = f'user_list_{user_name}'
     # cached_result = cache.get(cache_key)

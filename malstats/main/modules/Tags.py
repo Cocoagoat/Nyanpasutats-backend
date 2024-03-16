@@ -157,9 +157,9 @@ class Tags:
             self._all_doubletags = self.get_full_doubletags_list(sorted=True)
         return self._all_doubletags
 
-    @property
-    def single_tags_used_for_doubles(self):
-        pass
+    # @property
+    # def single_tags_used_for_doubles(self):
+    #     pass
 
     @property
     def tags_per_category(self):
@@ -225,9 +225,9 @@ class Tags:
         # All tags in a category will be of the same type, only doubletags have "<>" in them.
         return tag_type
 
-    @property
-    def relevant_tags_for_double(self):
-        pass
+    # @property
+    # def relevant_tags_for_double(self):
+    #     pass
 
     def get_full_tags_list(self):
         # with open(data_path / "NSFWTags.txt", 'r') as file:
@@ -460,7 +460,7 @@ class Tags:
             page_num += 1
             time.sleep(1)
 
-        # I have no idea wtf this is but every elegant mitigation measure against it failed
+        # Problematic case due to how it's listed in the MAL API
         if 'Black Clover: Mahou Tei no Ken' in self._entry_tags_dict.keys():
             del self._entry_tags_dict['Black Clover: Mahou Tei no Ken']
 
@@ -761,6 +761,12 @@ class Tags:
         with open(data_path / "NSFWTags.txt", 'r') as file:
             banned_tags = file.read().splitlines()
         return banned_tags
+
+    @staticmethod
+    def format_doubletag(input_string):
+        """Removes the angle brackets from doubletags"""
+        formatted_string = input_string.replace('<', '').replace('>', ' ').replace('x', 'x ').strip()
+        return formatted_string
 
 
 
