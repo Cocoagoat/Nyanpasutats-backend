@@ -1,3 +1,6 @@
+import datetime
+from random import shuffle
+
 try:
     import thread
 except ImportError:
@@ -5,10 +8,16 @@ except ImportError:
 
 import os
 from main.modules.filenames import *
-from main.modules.MAL_utils import *
+from main.modules.MAL_utils import MALUtils
 from main.modules.AnimeDB import AnimeDB
 from main.modules.GlobalValues import cpu_share
-from main.modules.Errors import UserListPrivateError
+from main.modules.Errors import UserListPrivateError, UserListFetchError
+from main.modules.AnimeListHandler import AnimeListHandler, MALListHandler
+import polars as pl
+import pickle
+import csv
+from main.modules.general_utils import load_pickled_file, list_to_uint8_array, save_list_to_csv
+
 
 
 class UserDB:
@@ -141,7 +150,6 @@ class UserDB:
         " 'XXXXXX': array([10,  0, 10, ...,  0,  0,  0], dtype=uint8)," \
         " 'XXXXXX': array([7, 8, 0, ..., 0, 0, 0], dtype=uint8)"
 
-
         if not self._scores_dict:
             print("Unpickling main scores dictionary")
             try:
@@ -165,14 +173,12 @@ class UserDB:
 
     @scores_dict.setter
     def scores_dict(self, value):
-        """Not really necessary, here just in case"""
         if isinstance(value, dict):
             self._scores_dict = value
         else:
             raise ValueError("scores_dict must be a dictionary")
 
     def save_scores_dict(self):
-        """Utility function just to have 1 line instead of 2"""
         with open(scores_dict_filename, 'wb') as file:
             pickle.dump(self.scores_dict, file)
 
@@ -269,7 +275,7 @@ class UserDB:
             current_time = datetime.datetime.now(datetime.timezone.utc)
             account_age_threshold = datetime.timedelta(days=30)
             min_scored_shows = 50  # User needs to have scored at least 50 shows to be part of the DB
-            user_scored_shows = count_scored_shows(user_list)
+            user_scored_shows = MALUtils.count_scored_shows(user_list)
 
             if user_scored_shows >= min_scored_shows:
                 show_amount = 0
@@ -304,7 +310,7 @@ class UserDB:
                     if not account_age_verified:  # If we couldn't verify through the anime list, we check the
                         # user's page directly. We only want to use this as a last resort since unlike the
                         # former it takes another API call to do so.
-                        account_age = check_account_age_directly(username)
+                        account_age = MALUtils.check_account_age_directly(username)
                         if account_age < account_age_threshold:
                             print(f"{username}'s account is {account_age} old, likely a troll")
                             return False
@@ -326,7 +332,7 @@ class UserDB:
         def save_data():
 
             print(f"Saving database. Currently on {current_users} entries")
-            logger.debug(f"Saving database. Currently on {current_users} entries")
+            # logger.debug(f"Saving database. Currently on {current_users} entries")
 
             # First we create a df from the temporary dictionary. Then we concatenate
             # it with the existing database.
@@ -404,10 +410,10 @@ class UserDB:
                     continue
                 print(f"Scored amount of {title} is {scored_amount}, proceeding with current show")
 
-                title = replace_characters_for_url(title)
+                title = MALUtils.replace_characters_for_url(title)
                 base_url = f"https://myanimelist.net/anime/{id}/{title}/stats?"
                 print(base_url)
-                users_table = get_usernames_from_show(base_url)
+                users_table = MALUtils.get_usernames_from_show(base_url)
                 # This returns a table of list updates
 
                 for table_row in users_table:
@@ -426,7 +432,8 @@ class UserDB:
                         if user_name.startswith('ishinashi'):  # Anti-troll measures, remove later
                             continue
                         try:
-                            user_anime_list = get_user_MAL_list(user_name, full_list=False)
+                            list_handler = MALListHandler(user_name, full_list=False)
+                            user_anime_list = list_handler.anime_list
                         except UserListFetchError:
                             continue  # Either user's list is private or doesn't exist, moving on to next username
                         dict_user_index = current_users - initial_users - saved_so_far
@@ -452,112 +459,19 @@ class UserDB:
                     # We reached the necessary amount of users in the database
                     return
 
-    # def create_user_entry(self, user_name):
-    #     """Creates a user entry for the one we're calculating affinity for + returns a Polars row of their stats.
-    #     Currently not in use due to being time-inefficient at adding in real-time. New process maybe?"""
-    #     if user_name not in self.MAL_users_list and user_name not in self.blacklist:
-    #         user_list = get_user_MAL_list(user_name, full_list=False)
-    #         if not user_list:
-    #             print("Unable to access private user list. Please make your list public and try again.")
-    #             terminate_program()
-    #     else:
-    #         print("User already exists in database")
-    #         return
-    #
-    #     old_titles = [x for x in self.df.columns if x not in self.stats]
-    #
-    #     anime_indexes = {v: k for (k, v) in enumerate(old_titles)}
-    #     new_list = [None] * (len(old_titles))
-    #
-    #     show_amount = 0
-    #     score_sum = 0
-    #     for anime in user_list:  # anime_list, scores_db
-    #         title = anime['node']['title']
-    #         score = anime['list_status']['score']
-    #         if score == 0:
-    #             break
-    #         show_amount += 1
-    #         if title in self.anime_db.titles:
-    #             new_list[anime_indexes[title]] = score
-    #         score_sum += score
-    #
-    #     mean_score = round(score_sum / show_amount, 4)
-    #     new_list_for_return = list_to_uint8_array(new_list)  # We save the original list here,
-    #     # because later we'll have to add fields that are relevant for adding to DB but not for list comparison.
-    #
-    #     if 2 <= mean_score <= 9.7:  # Removing troll accounts/people who score everything 10/10
-    #         index = self.df.shape[0]
-    #         new_list = [index, user_name, mean_score, show_amount] + new_list
-    #
-    #         schema_dict = {'Index': pl.Int64, 'Username': pl.Utf8, 'Mean Score': pl.Float32,
-    #                        'Scored Shows': pl.UInt32} | \
-    #                       {x: y for (x, y) in zip(old_titles, [pl.UInt8] * len(old_titles))}
-    #
-    #         new_dict = {k: v for k, v in zip(self.df.columns, new_list)}
-    #
-    #         new_row = pl.DataFrame(new_dict, schema=schema_dict)
-    #         print(new_row)
-    #
-    #         self.df = pl.concat(
-    #             [
-    #                 self.df,
-    #                 new_row,
-    #             ],
-    #             how="vertical",
-    #         )
-    #
-    #         self.df.write_parquet(user_database_name)
-    #         self.MAL_users_list.append(user_name)
-    #         save_list_to_csv(self.MAL_users_list, MAL_users_filename)
-    #     return new_list_for_return
+    def get_user_db_entry(self, user_name, site="MAL"):
+        titles = [x for x in self.columns if x not in self.stats]
+        ListHandler = AnimeListHandler.get_concrete_handler(site)
+        list_handler = ListHandler(user_name)
+        user_scores_list, mean_score, show_amount = list_handler.get_user_scores_list(db_row=True)
+        index = 0   # Index doesn't really matter, just needs to be there for the structure
+        new_list = [index, user_name, mean_score, show_amount] + user_scores_list
 
-    def get_user_db_entry(self, user_name, return_type='db_row'):
-        user_db = UserDB()
-        user_list = get_user_MAL_list(user_name, full_list=False)
-        # if not user_list:
-        #     print("Unable to access private user list. Please make your list public and try again.")
-        #     return
-
-        old_titles = [x for x in self.columns if x not in self.stats]
-
-        anime_indexes = {v: k for (k, v) in enumerate(old_titles)}
-        # new_list = [None] * len(self.titles)
-        new_list = [None] * (len(old_titles))
-
-        show_amount = 0
-        score_sum = 0
-        for anime in user_list:  # anime_list, scores_db
-            title = anime['node']['title']
-            score = anime['list_status']['score']
-            if score == 0:
-                break
-            show_amount += 1
-            if title in user_db.columns:
-                new_list[anime_indexes[title]] = score
-            score_sum += score
-
-        try:
-            mean_score = round(score_sum / show_amount, 4)
-        except ZeroDivisionError:
-            print("User has no scored shows. Aborting")  # Users are filtered (must have >50 scored shows), but
-            # technically a user can remove all his scores between the time they were added to the db and
-            # the time this program runs.
-            return
-
-        # We save the original list here,
-        # because later we'll have to add fields that are relevant for adding to DB but not for list comparison.
-
-        index = 0
-        new_list = [index, user_name, mean_score, show_amount] + new_list
         schema_dict = {'Index': pl.Int64, 'Username': pl.Utf8, 'Mean Score': pl.Float32, 'Scored Shows': pl.UInt32} | \
-                      {x: y for (x, y) in zip(old_titles, [pl.UInt8] * len(old_titles))}
+                      {x: y for (x, y) in zip(titles, [pl.UInt8] * len(titles))}
 
         new_dict = {k: v for k, v in zip(self.columns, new_list)}
 
         new_row = pl.DataFrame(new_dict, schema=schema_dict)
-        if return_type == 'db_row':
-            return new_row
-        elif return_type == 'score_list':
-            score_list = list_to_uint8_array(new_list[4:])
-            return score_list
-        raise ValueError("Unknown return type requested for user db entry")
+
+        return new_row

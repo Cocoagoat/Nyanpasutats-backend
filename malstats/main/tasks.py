@@ -1,6 +1,8 @@
 from .modules.Model import Model
 from pathlib import Path
 from django.core.cache import cache
+
+from .modules.SeasonalStats2 import SeasonalStats2
 from .modules.filenames import current_model_name
 from celery import shared_task, Task
 from animisc.celery import app
@@ -64,11 +66,14 @@ class MyTask(Task):
 
 @shared_task(base=MyTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
-def get_user_seasonal_stats_task(username):
+def get_user_seasonal_stats_task(username, site="Anilist"):
     print("Entering seasonal task")
     try:
-        seasonal_dict, seasonal_dict_no_sequels = SeasonalStats.get_user_seasonal_stats(username)
-        result = {'Stats': seasonal_dict, 'StatsNoSequels': seasonal_dict_no_sequels}
+        stats = SeasonalStats2(username, site).full_stats.to_dict()
+        no_seq_stats = SeasonalStats2(username, site, no_sequels=True).full_stats.to_dict()
+
+        # seasonal_dict, seasonal_dict_no_sequels = SeasonalStats.get_user_seasonal_stats(username)
+        result = {'Stats': stats, 'StatsNoSequels': no_seq_stats}
         # cache.set(cache_key, result, CACHE_TIMEOUT)
         # cache.set("test", "1", CACHE_TIMEOUT)
         # print("Cache is supposed to be set at this point")
@@ -77,24 +82,23 @@ def get_user_seasonal_stats_task(username):
         # cache.set(cache_key, result, 60) # test this
         return {'error': e.message, 'status': e.status}
     except Exception as e:
-        if not e.status:
-            e.status = 400
         # I know this is bad practice, but in case of an unexpected error in fetching
         # an individual user's stats, we do not want the site to crash.
-        logging.error(f"An unexpected error has occurred. {e.status} {e.message}")
-        return {'error': e.message, 'status': e.status}
+        logging.error(f"An unexpected error has occurred. {e}")
+        return {'error': e.args, 'status': 500}
 
 
 @shared_task(base=MyTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
-def get_user_recs_task(username):
+def get_user_recs_task(username, site="Anilist"):
     print("Entering recommendations task")
     global model
     if not model:
         print("Initializing model")
         model = Model(model_filename=current_dir / "MLmodels" / current_model_name)
     try:
-        predictions, predictions_sorted_by_diff, fav_tags, least_fav_tags = model.predict_scores(username, db_type=1)
+        predictions, predictions_sorted_by_diff, fav_tags, least_fav_tags = model.predict_scores(
+            username, site, db_type=1)
         print("After returning from predict_scores")
         # predictions = predictions.astype(float)
         return {'Recommendations': predictions,
@@ -104,24 +108,20 @@ def get_user_recs_task(username):
     except UserListFetchError as e:
         return {'error': e.message, 'status': e.status}
     except Exception as e:
-        if not e.status:
-            e.status = 400
-        logging.error(f"An unexpected error has occurred. {e.message}")
-        return {'error': e.message, 'status': e.status}
+        logging.error(f"An unexpected error has occurred. {e}")
+        return {'error': e, 'status': 500}
 
 
 @shared_task(base=MyTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
-def get_user_affs_task(username):
+def get_user_affs_task(username, site="Anilist"):
     print("Entering affinities task")
     try:
-        pos_affinities, neg_affinities = find_max_affinity(username)
+        pos_affinities, neg_affinities = find_max_affinity(username, site)
         print("After returning from find_max_affinities")
         return {'PosAffs': pos_affinities, 'NegAffs': neg_affinities}
     except UserListFetchError as e:
         return {'error': e.message, 'status': e.status}
     except Exception as e:
-        if not e.status:
-            e.status = 400
-        logging.error(f"An unexpected error has occurred. {e.status} {e.message}")
-        return {'error': e.message, 'status': e.status}
+        logging.error(f"An unexpected error has occurred. {e}")
+        return {'error': e, 'status': 500}

@@ -718,13 +718,13 @@ class Model:
     #     predictions = self.model.predict(features)
     #     deviations = user_scores - predictions
 
-    def predict_scores(self, user_name, db_type=1):
+    def predict_scores(self, user_name, site="MAL", db_type=1):
 
 
         with_mean = False
         shows_to_take = "all"
         # shows_to_take="all"
-        user_row = self.user_db.get_user_db_entry(user_name)
+        user_row = self.user_db.get_user_db_entry(user_name, site)
 
         # turn user_row into a dict sometime when its not 3am
         # try:

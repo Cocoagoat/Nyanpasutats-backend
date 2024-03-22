@@ -76,3 +76,19 @@
 #         marked.update(new_refr.keys())
 #
 #     return sz
+
+
+# def get_anime_batch_from_jikan(page_num):
+#     """Utility function to get a batch of 25 shows from the Jikan API. Only exists because
+#     it sometimes throws weird errors which require us to retry so that we don't skip any shows"""
+#     url = f'https://api.jikan.moe/v4/top/anime?page={page_num}'
+#     anime_batch = call_function_through_process(get_search_results, url)
+#     while anime_batch is None:
+#         # We keep retrying until we get the batch, the URL is correct so the main reason
+#         # for failure would be the API itself being down, in which case we just wait for it
+#         # to come back up.
+#         print("Anime batch was returned as None, sleeping and retrying")
+#         # logger.debug("Anime batch was returned as None, sleeping and retrying")
+#         time.sleep(Sleep.MEDIUM_SLEEP)
+#         anime_batch = call_function_through_process(get_search_results, url)
+#     return anime_batch

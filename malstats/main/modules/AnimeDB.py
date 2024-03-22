@@ -1,7 +1,15 @@
+import datetime
+import time
+from polars import ColumnNotFoundError
 from .filenames import *
-from .MAL_utils import *
+from .MAL_utils import Seasons, MediaTypes, MALUtils
 import django
 import os
+import polars as pl
+import pyarrow as pa
+import pyarrow.parquet as pq
+from .general_utils import Sleep
+
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'animisc.settings')
 django.setup()
 from main.models import AnimeData
@@ -61,6 +69,7 @@ class AnimeDB:
             cls._instance._df = None
             cls._instance._titles = None
             cls._instance._partial_df = None
+            cls._instance._df_metadata = None
             cls._instance._ids = None
             cls._instance._mean_scores = None
             cls._instance._scored_amounts = None
@@ -75,7 +84,6 @@ class AnimeDB:
     def __init__(self):
         # All properties are loaded on demand
         pass
-
 
     stats = {'ID': 0, 'Mean Score': 1, 'Scores': 2, 'Members': 3, 'Episodes': 4,
              'Duration': 5, 'Type': 6, 'Year': 7, 'Season': 8}
@@ -94,20 +102,34 @@ class AnimeDB:
         return self._df
 
     @property
+    def df_metadata(self):
+        if not self._df_metadata:
+            self._df_metadata = pq.ParquetFile(anime_database_name)
+        return self._df_metadata
+
+    @property
+    def titles(self):  # change this into a normal var?
+        """A list of all the anime titles."""
+        if not self._titles:
+            columns = [field.name for field in self.df_metadata.schema]
+            self._titles = columns[1:]
+        return self._titles
+
+    @property
     def partial_df(self):
         if not isinstance(self._partial_df, pl.DataFrame):
             df_dict = self.df.to_dict(as_series=False)
             titles = [title for title, show_stats in df_dict.items()
                                        if (title!='Rows' and
                                        self.show_meets_conditions(show_stats))]
-            _partial_df = self.df.select(["Rows"] + titles)
-        return _partial_df
+            self._partial_df = self.df.select(["Rows"] + titles)
+        return self._partial_df
 
     @property
     def ids(self):
         if not self._ids:
             ids_row = self.df.row(self.stats['ID'])
-            self._ids = {title : ID for (title,ID)
+            self._ids = {title: ID for (title,ID)
                          in list(zip(self.titles, ids_row[1:]))}
         return self._ids
 
@@ -188,12 +210,7 @@ class AnimeDB:
             return True
         return False
 
-    @property
-    def titles(self):  # change this into a normal var?
-        """A list of all the anime titles."""
-        if not self._titles:
-            self._titles = self.df.columns[1:]  # anime_df will automatically be generated
-        return self._titles
+
 
     def get_stats_of_shows(self, show_list, relevant_stats: list):
         """ Will create a dictionary that has every show in show_list as the key, and every stat in relevant_stats
@@ -315,7 +332,7 @@ class AnimeDB:
             # sorted by score, from highest to lowest) until we reach the lowest rated show.
             # There should be 25 shows per page/batch.
 
-            anime_batch = get_anime_batch_from_MAL(page_num, url_required_fields)
+            anime_batch = MALUtils.get_anime_batch_from_MAL(page_num, url_required_fields)
             try:
                 print(f"Currently on score {anime_batch['data'][-1]['node']['mean']}")
             except KeyError:
@@ -328,10 +345,10 @@ class AnimeDB:
                 # or even days.
                 print("Error - unable to get batch. Sleeping just to be safe, "
                       "then trying again.")
-                logging.error("Error - unable to get batch. Sleeping just to be safe, "
-                              "then trying again.")
+                # logging.error("Error - unable to get batch. Sleeping just to be safe, "
+                #               "then trying again.")
                 time.sleep(Sleep.LONG_SLEEP)
-                anime_batch = get_anime_batch_from_MAL(page_num, url_required_fields)
+                anime_batch = MALUtils.get_anime_batch_from_MAL(page_num, url_required_fields)
                 print(anime_batch)
 
             for anime in anime_batch["data"]:

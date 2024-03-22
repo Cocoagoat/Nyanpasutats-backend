@@ -1,8 +1,8 @@
 import sys
-print(sys.path)
 from main.modules.Model import Model
 from main.modules.GeneralData import GeneralData
 from pathlib import Path
+from UserDB import UserDB
 from multiprocessing import freeze_support
 import polars as pl
 from main.modules.general_utils import find_duplicates
@@ -15,7 +15,10 @@ from main.modules.AffinityDB import AffinityDB
 import random
 from main.modules.AffinityFinder import find_max_affinity
 from main.modules.SeasonalStats import SeasonalStats
+from main.modules.SeasonalStats2 import SeasonalStats2
 from animisc.celery import app
+from main.modules.AnimeListHandler import MALListHandler, AnilistHandler
+from main.modules.AnimeListFormatter import ListFormatter
 
 
 
@@ -62,14 +65,50 @@ def main():
     # print('Task result:', task_result.result)
     # task = get_user_seasonal_stats_task.delay("BaronBrixius")
     # test = TaskQueue.objects.all()
-    print(10)
-    current_dir = Path(__file__).parent.parent
-    model = Model(model_filename = current_dir / "MLmodels" / current_model_name)
-    # # stats = SeasonalStats()
-    test = model.predict_scores("BaronBrixius")
-    # test = stats.get_user_seasonal_stats("BaronBrixius")
+    # user_db = UserDB()
+    # test = user_db.get_user_db_entry("BaronBrixius")
+    # print(10)
+    # current_dir = Path(__file__).parent.parent
+    # test = find_max_affinity("RedInfinity")
+    # print(5)
+    model = Model(model_filename = current_dir.parent / "MLmodels" / current_model_name)
+    # test = SeasonalStats.get_user_seasonal_stats("BaronBrixius", "MAL")
+    # stats = SeasonalStats2("BaronBrixius", "MAL").full_stats.to_dict()
+    # no_seq_stats = SeasonalStats2("BaronBrixius", "MAL", no_sequels=True).full_stats.to_dict()
+    # stats = SeasonalStats2("BaronBrixius", "MAL")
+    # no_seq_stats = SeasonalStats2("BaronBrixius", "MAL", no_sequels=True)
+    # stats = SeasonalStats2("Voltabolt", "Anilist").full_stats.to_dict()
+    # no_seq_stats = SeasonalStats2("Voltabolt", "Anilist", no_sequels=True).full_stats.to_dict()
+
+    # test = stats.full_stats
+    # test2 = no_seq_stats.full_stats
+    # test3 = test.to_dict()
+    test = model.predict_scores("Voltabolt", site="Anilist")
+    test2 = find_max_affinity("Voltabolt", site="Anilist")
+    # test = stats.get_user_seasonal_stats("BaronBrixius", "MAL")
+    # test2 = stats.get_user_seasonal_stats("Voltabolt", "Anilist")
+
     # test2 = stats.get_user_seasonal_stats2("BaronBrixius")
+    # print(5)
+    # test_list = AnilistHandler("Voltabolt").anime_list.list
+    # # test_formatter = ListFormatter(test_list, stats_to_get=["score", "list_status", "num_watched"])
+    # # test_formatted_list = test_formatter.formatted_list
+    #
+    # test_list2 = MALListHandler("BaronBrixius").anime_list.list
     print(5)
+    # test_formatter2 = ListFormatter(test_list2)
+    # test_formatted_list2 = test_formatter2.formatted_list
+    #
+    # test_list3 = MALListHandler("BaronBrixius").anime_list
+    # test_formatter3 = ListFormatter(test_list2)
+    # test_formatted_list3 = test_formatter2.formatted_list
+    #
+    # mal_handler = MALListHandler("BaronBrixius")
+    # test_list = mal_handler.anime_list
+    # test_formatter = MALListFormatter(anime_list=test_list, stats_to_get=["score", "status"])
+    # anilist_handler = AnilistHandler("Voltabolt")
+    # test = anilist_handler.get_user_scores_list()
+    # print(5)
     # aff_db = AffinityDB()
     # model=Model()
     # model.predict_scores("BaronBrixius")

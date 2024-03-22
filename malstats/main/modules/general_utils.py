@@ -9,6 +9,10 @@ import pickle
 import pandas as pd
 from enum import Enum
 from functools import wraps
+import re
+
+from django.db.models import Case, When
+
 from .GlobalValues import CACHE_TIMEOUT
 from polars.exceptions import SchemaFieldNotFoundError
 import main.modules.GenerateAccessToken as AccessToken
@@ -683,6 +687,30 @@ def print_attributes(obj):
             print(f"{attr} : {str(value)[:50]}")
 
 
+def snake_to_camel(snake_str):
+    # Function to convert snake_case string to CamelCase
+    components = snake_str.split('_')
+    return components[0].capitalize() + ''.join(x.title() for x in components[1:])
+
+
+def camel_to_snake(name):
+    # Add an underscore before each capital letter (except the first one) and convert to lower case
+    snake_case = re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
+    return snake_case
+
+
+def convert_keys_to_camel_case(data):
+    if isinstance(data, dict):
+        # Recursively apply to dictionary keys
+        return {snake_to_camel(k): convert_keys_to_camel_case(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        # Recursively apply to elements in lists
+        return [convert_keys_to_camel_case(item) for item in data]
+    else:
+        # Base case: when data is neither a dict nor a list, just return the data itself
+        return data
+
+
 def is_redis_cache():
     # Access the backend of the default cache
     backend = settings.CACHES['default']['BACKEND']
@@ -696,6 +724,7 @@ def redis_cache_wrapper(timeout):
         @wraps(function)
         def wrapped(*args, **kwargs):
             print("Entering cache decorator")
+            print(*args, **kwargs)
             cache_key = f"{function.__name__}_{'_'.join(str(arg) for arg in args)}_{'_'.join(f'{key}_{value}' for key, value in kwargs.items())}"
             print("Cache key is", cache_key)
             result = cache.get(cache_key)
@@ -704,12 +733,16 @@ def redis_cache_wrapper(timeout):
             print("Entering function")
             result = function(*args, **kwargs)
 
-            if not (type(result) == 'dict' and 'error' in result.keys()):
+            if not (isinstance(result, dict) and 'error' in result):
                 print("No error found, caching the result")
                 cache.set(cache_key, result, timeout)
+                print("5")
             return result
         return wrapped
     return decorator
+
+
+
 
 
 # def cache_result_in_redis(function):

@@ -1,4 +1,4 @@
-from main.modules.UserDB import UserDB
+
 from main.modules.AnimeDB import AnimeDB
 from main.modules.general_utils import *
 from igraph import Graph, summary, union

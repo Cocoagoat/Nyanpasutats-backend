@@ -1,20 +1,24 @@
 from __future__ import print_function
 from time import perf_counter
+
+from main.modules.AnimeListHandler import MALListHandler, AnilistHandler
+
 try:
     import thread
 except ImportError:
     import _thread as thread
-from main.modules.general_utils import time_at_current_point, timeit
+from main.modules.general_utils import time_at_current_point, timeit, list_to_uint8_array
 import numpy as np
 from collections import defaultdict
 from main.modules.UserDB import UserDB
+
 import pyximport # Need this to import .pyx files
 pyximport.install(setup_args = {"include_dirs":np.get_include()}) # Need to manually include numpy or it won't work
 from main.modules.gottagofasttest2 import count_common_shows, compute_affinity
 
 
 @timeit
-def find_max_affinity(username, min_common_shows=20):
+def find_max_affinity(username, site="MAL", min_common_shows=20):
     """This function iterates over rows in the database and calculates the affinity
     between the user provided and each person (unless a limit is given) in the database.
     The affinity is calculated via Pearson's Correlation Coefficient.
@@ -41,11 +45,22 @@ def find_max_affinity(username, min_common_shows=20):
 
     t1 = perf_counter()
     username_list = list(user_db.scores_dict.keys())
-    try:
-        user_list = user_db.scores_dict[username]
-    except KeyError:
-        user_list = user_db.get_user_db_entry(username, return_type="score_list")
 
+    # user_list = None
+    if site == "MAL":
+        try:
+            user_list = user_db.scores_dict[username]
+            # Maybe user's already in database and we can save time
+            # Remove this later cause outdated
+        except KeyError:
+            user_list = MALListHandler(username).get_user_scores_list()
+    else:
+        user_list = AnilistHandler(username).get_user_scores_list()
+
+    user_list = list_to_uint8_array(user_list)
+    # if user_list is None:
+    #     user_list =
+    #     #change this to new style
     affinities_list = defaultdict()
 
     time_at_current_point(t1, "Start")

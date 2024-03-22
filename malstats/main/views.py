@@ -18,7 +18,7 @@ from django.http import JsonResponse
 from .modules.AffinityFinder import find_max_affinity
 from .modules.Errors import UserListFetchError
 from .modules.SeasonalStats import SeasonalStats
-from .modules.MAL_utils import get_anime_id_by_name, get_search_results
+from .modules.MAL_utils import get_data
 from .tasks import get_user_seasonal_stats_task, get_user_recs_task, get_user_affs_task
 from .models import AnimeData, TaskQueue, UsernameCache
 from .modules.UserDB import UserDB
@@ -236,7 +236,7 @@ def update_image_url_view(request):
     image_exists = requests.head(existing_image_url)
     if not image_exists:
         url = f'https://api.myanimelist.net/v2/anime/{show_id}?fields=main_picture'
-        MAL_show_data = get_search_results(url)
+        MAL_show_data = get_data(url)
         image_url = MAL_show_data['main_picture']['medium']
         existing_show_data.image_url = image_url
         existing_show_data.save()

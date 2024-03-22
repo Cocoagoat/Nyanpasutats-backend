@@ -7,3 +7,5 @@ model_types = {
 }
 
 CACHE_TIMEOUT = 3600
+
+SUPPORTED_WEBSITES = ["MAL", "Anilist"]

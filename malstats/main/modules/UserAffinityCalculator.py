@@ -108,7 +108,7 @@ class UserAffinityCalculator:
 
             if user_score >= self.user.mean_of_watched:
                 self.user.tag_pos_affinity_dict[tag['name']] += MAL_score_coeff * \
-                                                                self.user.exp_coeffs[10 - user_score] \
+                                                                self.user.exp_coeffs[round(10 - user_score)] \
                                                                 * adjusted_p * length_coeff
 
         # for genre in self.tags.entry_tags_dict[related_entry]['Genres']:
@@ -121,7 +121,7 @@ class UserAffinityCalculator:
 
             if user_score >= self.user.mean_of_watched:
                 self.user.tag_pos_affinity_dict[genre] += MAL_score_coeff * \
-                                                          self.user.exp_coeffs[10 - user_score] \
+                                                          self.user.exp_coeffs[round(10 - user_score)] \
                                                           * length_coeff
 
         show_studio = self.tags.entry_tags_dict[related_entry]['Studio']
@@ -133,7 +133,7 @@ class UserAffinityCalculator:
 
             if user_score >= self.user.mean_of_watched:
                 self.user.tag_pos_affinity_dict[show_studio] += MAL_score_coeff * \
-                                                                self.user.exp_coeffs[10 - user_score] \
+                                                                self.user.exp_coeffs[round(10 - user_score)] \
                                                                 * length_coeff
 
     def get_user_affs(self):
@@ -159,7 +159,7 @@ class UserAffinityCalculator:
 
         for entry in self.user.entry_list:
             user_score = self.user.scores[entry]
-            if not user_score or entry in processed_entries or entry.startswith('K-On!'):
+            if not user_score or entry in processed_entries:
                 continue
 
             try:
@@ -236,7 +236,7 @@ class UserAffinityCalculator:
             entry_MAL_coeff = self.MAL_score_coeff(entry_MAL_score)
             # Turn the data thingy into a dict so no .item()
             try:
-                entry_exp_coeff = self.user.exp_coeffs[10 - entry_user_score]
+                entry_exp_coeff = self.user.exp_coeffs[round(10 - entry_user_score)]
             except IndexError:
                 entry_exp_coeff = 0
 
