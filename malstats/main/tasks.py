@@ -49,8 +49,9 @@ class MyTask(Task):
     def delete_task(task_id):
         print(f"Fetching task {task_id} to delete")
         task = TaskQueue.objects.get(task_id=task_id)
-        print("Deleting task",task)
+        print("Deleting task", task)
         task.delete()
+
 
 
 # def on_task_success(result, *args, **kwargs):
@@ -66,7 +67,7 @@ class MyTask(Task):
 
 @shared_task(base=MyTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
-def get_user_seasonal_stats_task(username, site="Anilist"):
+def get_user_seasonal_stats_task(username, site="MAL"):
     print("Entering seasonal task")
     try:
         stats = SeasonalStats2(username, site).full_stats.to_dict()
@@ -85,12 +86,12 @@ def get_user_seasonal_stats_task(username, site="Anilist"):
         # I know this is bad practice, but in case of an unexpected error in fetching
         # an individual user's stats, we do not want the site to crash.
         logging.error(f"An unexpected error has occurred. {e}")
-        return {'error': e.args, 'status': 500}
+        return {'error': "An unexpected error has occurred on our side. Please try again later.", 'status': 500}
 
 
 @shared_task(base=MyTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
-def get_user_recs_task(username, site="Anilist"):
+def get_user_recs_task(username, site="MAL"):
     print("Entering recommendations task")
     global model
     if not model:
@@ -109,12 +110,12 @@ def get_user_recs_task(username, site="Anilist"):
         return {'error': e.message, 'status': e.status}
     except Exception as e:
         logging.error(f"An unexpected error has occurred. {e}")
-        return {'error': e, 'status': 500}
+        return {'error': "An unexpected error has occurred on our side. Please try again later.", 'status': 500}
 
 
 @shared_task(base=MyTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
-def get_user_affs_task(username, site="Anilist"):
+def get_user_affs_task(username, site="MAL"):
     print("Entering affinities task")
     try:
         pos_affinities, neg_affinities = find_max_affinity(username, site)
@@ -124,4 +125,4 @@ def get_user_affs_task(username, site="Anilist"):
         return {'error': e.message, 'status': e.status}
     except Exception as e:
         logging.error(f"An unexpected error has occurred. {e}")
-        return {'error': e, 'status': 500}
+        return {'error': "An unexpected error has occurred on our side. Please try again later.", 'status': 500}

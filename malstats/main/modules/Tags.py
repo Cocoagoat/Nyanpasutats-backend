@@ -494,7 +494,7 @@ class Tags:
                     tag2_p = tag2['percentage'] if type(tag2) is dict else 1
                     if f"<{tag1_name}>x<{tag2_name}>" in relevant_double_tags:
                         self._entry_tags_dict[entry]['DoubleTags'].append(
-                            {'name' : f"<{tag1_name}>x<{tag2_name}>", 'percentage' : min(tag1_p, tag2_p)})
+                            {'name': f"<{tag1_name}>x<{tag2_name}>", 'percentage': min(tag1_p, tag2_p)})
                     elif f"<{tag2_name}>x<{tag1_name}>" in relevant_double_tags:
                         self._entry_tags_dict[entry]['DoubleTags'].append(
                             {'name': f"<{tag2_name}>x<{tag1_name}>", 'percentage': min(tag1_p, tag2_p)})
@@ -765,7 +765,7 @@ class Tags:
     @staticmethod
     def format_doubletag(input_string):
         """Removes the angle brackets from doubletags"""
-        formatted_string = input_string.replace('<', '').replace('>', ' ').replace('x', 'x ').strip()
+        formatted_string = input_string.replace('<', ' ').replace('>', ' ').strip()
         return formatted_string
 
 

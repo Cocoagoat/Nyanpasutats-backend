@@ -16,8 +16,7 @@ from main.modules.AnimeListHandler import AnimeListHandler, MALListHandler
 import polars as pl
 import pickle
 import csv
-from main.modules.general_utils import load_pickled_file, list_to_uint8_array, save_list_to_csv
-
+from main.modules.general_utils import load_pickled_file, list_to_uint8_array, save_list_to_csv, save_pickled_file
 
 
 class UserDB:
@@ -178,6 +177,13 @@ class UserDB:
         else:
             raise ValueError("scores_dict must be a dictionary")
 
+    def split_scores_dict(self):
+        filename = str(scores_dict_filename).split(".")[0]
+        for i in range(100):
+            size = round(len(self.scores_dict)/10)
+            dict_part_i = dict(list(self.scores_dict.items())[i*size:(i+1)*size])
+            save_pickled_file(f"{filename}-P{i+1}.pickle", dict_part_i)
+
     def save_scores_dict(self):
         with open(scores_dict_filename, 'wb') as file:
             pickle.dump(self.scores_dict, file)
@@ -259,6 +265,7 @@ class UserDB:
         save_list_to_csv(self._blacklist, blacklist_users_filename)
         print(f"Saving scores dictionary")
         self.save_scores_dict()
+        self.split_scores_dict()
         print("Finished saving")
 
     # @timeit

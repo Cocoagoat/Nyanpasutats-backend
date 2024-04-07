@@ -1,5 +1,11 @@
 from django.db import models
 from .model_managers import RetryManager
+from django.db.utils import OperationalError
+import time
+
+import logging
+
+view_logger = logging.getLogger('Nyanpasutats.view')
 
 
 class AnimeData(models.Model):
@@ -33,6 +39,16 @@ class TaskQueue(models.Model):
         return self.task_id
 
     objects = RetryManager()
+
+    def delete(self, retries=50, delay=1, *args, **kwargs):
+        for attempt in range(retries):
+            try:
+                return super(TaskQueue, self).delete(*args, **kwargs)
+            except OperationalError:
+                view_logger.error("Caught Operational Error during delete")
+                if attempt + 1 == retries:
+                    raise
+                time.sleep(delay)
 
 
 class UsernameCache(models.Model):

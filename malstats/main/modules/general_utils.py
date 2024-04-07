@@ -392,7 +392,7 @@ def parse_xml(xml_file):
     return anime_list
 
 
-def get_data(url):
+def get_data(url, site=None):
     for _ in range(10):
         try:
             time.sleep(1)
@@ -740,6 +740,49 @@ def redis_cache_wrapper(timeout):
             return result
         return wrapped
     return decorator
+
+
+def rate_limit(rate_lim=1, cache_key=None):
+    def decorator(function):
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            print("Entering rate limiter")
+            # nonlocal cache_key
+            # if not cache_key:
+            #     if "site" in kwargs.keys():
+            #         cache_key = f"{kwargs['site']}_rate_limit"
+            #     else:
+            #         raise ValueError("If the decorator doesn't have a cache_key,"
+            #                          "the wrapped function must provide a site")
+
+            print("Cache key is", cache_key)
+            while not can_make_api_call(rate_lim, cache_key):
+                print("Sleeping to avoid rate limit")
+                time.sleep(0.1)
+            print("Entering function")
+            result = function(*args, **kwargs)
+            return result
+        return wrapped
+    return decorator
+
+
+def can_make_api_call(rate_lim, cache_key):
+
+    current_time = int(time.time())
+    last_api_call_time = cache.get(cache_key)
+
+    if last_api_call_time is None or (current_time - int(last_api_call_time)) >= rate_lim:
+        # Update the last API call time and proceed
+        cache.set(cache_key, current_time)
+        return True
+    else:
+        # Wait if we're within the rate limit window
+        return False
+
+
+# def make_api_call_with_rate_limit(r: redis.Redis, key: str, rate_limit: int):
+#     while not can_make_api_call(r, key, rate_limit):
+#         time.sleep(0.1)  # Sleep a bit before trying again
 
 
 

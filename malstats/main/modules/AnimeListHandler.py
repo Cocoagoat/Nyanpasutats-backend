@@ -4,7 +4,7 @@ import requests
 from abc import ABC, abstractmethod
 import polars as pl
 from main.modules.Errors import UserDoesNotExistError
-from main.modules.general_utils import list_to_uint8_array, timeit, redis_cache_wrapper
+from main.modules.general_utils import list_to_uint8_array, timeit, redis_cache_wrapper, rate_limit
 from dataclasses import dataclass, field
 from main.modules.AnimeList import MALList, AniList
 from django.core.cache import cache
@@ -128,7 +128,10 @@ class MALListHandler(AnimeListHandler):
             self._anime_list = MALList(self._fetch_user_anime_list())
         return self._anime_list
 
-    @timeit
+    @rate_limit(rate_lim=5, cache_key="MAL_rate_limit")
+    def _send_request_for_list(self, url):
+        return get_data(url)
+
     def _fetch_user_anime_list(self):
         # Manual redis caching, decorator won't work since user_name isn't part of the
         # args here
@@ -141,7 +144,7 @@ class MALListHandler(AnimeListHandler):
 
         url = f'https://api.myanimelist.net/v2/users/' \
               f'{self.user_name}/animelist?fields=list_status&limit=1000&sort=list_score&nsfw=True'
-        response = get_data(url)
+        response = self._send_request_for_list(url)
         anime_list = response["data"]
 
         # If the user has more than 1000 entries in their list, we will need separate API
@@ -159,7 +162,7 @@ class MALListHandler(AnimeListHandler):
                       f'{self.user_name}/animelist?fields=list_status&limit=1000&sort' \
                       f'=list_score' \
                       f'&offset={1000 * thousands}&nsfw=True'  #
-                response = get_data(url)
+                response = self._send_request_for_list(url)
                 next_part = response["data"]
                 anime_list = anime_list + next_part
                 thousands += 1
@@ -218,7 +221,34 @@ class MALListHandler(AnimeListHandler):
 
 
 class AnilistHandler(AnimeListHandler):
+    query = '''
+            query ($userName: String) {
+          MediaListCollection(userName: $userName, type: ANIME) {
+            lists {
+              name
+              entries {
+                media {
 
+                  title {
+                    userPreferred
+                  }
+                  coverImage {
+                    large
+                  }
+                  episodes
+                  averageScore
+                  idMal
+                }
+                score
+                status
+                updatedAt
+              }
+            }
+          }
+        }
+            '''
+
+    url = 'https://graphql.anilist.co'
     def __init__(self, user_name=None, anime_list=[]):
         super().__init__(user_name, anime_list)
 
@@ -232,45 +262,22 @@ class AnilistHandler(AnimeListHandler):
             self._anime_list = AniList(self._fetch_user_anime_list())
         return self._anime_list
 
-    @timeit
+    @rate_limit(rate_lim=5, cache_key="Anilist_rate_limit")
+    def _send_request_for_list(self, variables):
+        return requests.post(self.url, json={"query": self.query,
+                                             "variables": variables}, timeout=30).json()
+
     def _fetch_user_anime_list(self, full_list=True):
-        query = '''
-        query ($userName: String) {
-      MediaListCollection(userName: $userName, type: ANIME) {
-        lists {
-          name
-          entries {
-            media {
-            
-              title {
-                userPreferred
-              }
-              coverImage {
-                large
-              }
-              episodes
-              averageScore
-              idMal
-            }
-            score
-            status
-            updatedAt
-          }
-        }
-      }
-    }
-        '''
 
         cache_key = f"user_list_{self.user_name}_Anilist"
         result = cache.get(cache_key)
         if result is not None:
             return result
 
-        url = 'https://graphql.anilist.co'
         variables = {
             'userName': self.user_name
         }
-        anime_list = requests.post(url, json={"query": query, "variables": variables}, timeout=30).json()
+        anime_list = self._send_request_for_list(variables)
         if not anime_list:
             raise UserDoesNotExistError(f"User {self.user_name} does not exist.")
         anime_list = [entry for lst in anime_list['data']['MediaListCollection']['lists'] if lst['name'] != 'Planning'

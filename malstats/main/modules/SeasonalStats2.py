@@ -52,6 +52,12 @@ class Season:
         self.show_list = {show: score for show, score in sorted(
                 self.show_list.items(), reverse=True, key=lambda x: x[1])}
 
+    @staticmethod
+    def get_season_value(season_name):
+        season_name, year = season_name.split(" ")
+        return int(year) + (Seasons[season_name].value/10)
+
+
 
 class SeasonCollection:
     def __init__(self):
@@ -103,9 +109,15 @@ class SeasonCollection:
             raise ValueError(f"Attribute {attribute_name} not found in Season class.")
 
         self.__sorted = True
+        if not attribute_name == "name":
+            sort_key = lambda x: getattr(x[1], attribute_name)
+
+        else:
+            sort_key = lambda x: Season.get_season_value(getattr(x[1], attribute_name))
+
         self.seasons = {season: season_stats for season, season_stats
                         in sorted(self.seasons.items(),
-                                  key=lambda x: getattr(x[1], attribute_name),
+                                  key=sort_key,
                                   reverse=True)}
 
     def sort_show_lists(self):
@@ -147,7 +159,6 @@ class SeasonalStats2:
             self.sort_full_stats_by_fav_avg()
         return self._full_stats_sorted_by_fav_avg
 
-    @timeit
     def __initialize_seasonal_stats(self):
         for anime in self.anime_data:
 
@@ -168,7 +179,6 @@ class SeasonalStats2:
                                                     user_score, user_list_status)
 
     @staticmethod
-    @timeit
     def filter_by_min_shows(full_stats: SeasonCollection):
         full_stats.seasons = {season_name: season_data for season_name, season_data
                               in full_stats.seasons.items() if season_data.scored_shows >= 5}
@@ -181,6 +191,7 @@ class SeasonalStats2:
 
     @timeit
     def _add_stat(self, stat_name):
+        print(f"Stat name is {stat_name}")
         if stat_name not in self.STAT_NAMES:
             raise ValueError(f"{stat_name} is not a valid seasonal stat")
 
@@ -216,6 +227,7 @@ class SeasonalStats2:
 
             season_stats.favorites_avg_score = fav_avg_score
 
+    @timeit
     def _add_rank(self, rank_type):
         valid_rank_types = ["overall_rank", "favorites_rank"]
         if rank_type not in valid_rank_types:
@@ -307,9 +319,13 @@ class SeasonalStats2:
 
         for season_name, season_stats in self._full_stats:
 
-            MAL_scores = {anime.name: float(anime.mean_score)
-                          for anime in self.anime_data.filter(
-                          name__in=season_stats.show_list.keys())}
+            # MAL_scores = {anime.name: float(anime.mean_score)
+            #               for anime in self.anime_data.filter(
+            #               name__in=season_stats.show_list.keys())}
+            # ^ do not do this, every filter is really slow
+
+            MAL_scores = {anime.name: float(anime.mean_score) for anime in
+                          self.anime_data if anime.name in season_stats.show_list.keys()}
 
             most_unusual_score = find_most_unusual_in_season(season_stats.show_list)
             # for show, score in season_stats.show_list.items():
@@ -355,10 +371,12 @@ class SeasonalStats2:
     def _add_total_shows_duration(self):
         for season_name, season_stats in self._full_stats:
             # show_obj_list = [AnimeData.objects.get(name=title) for title in season_stats.show_list]
-            show_obj_list = season_stats.get_db_objects_of_shows()
+            # show_obj_list = season_stats.get_db_objects_of_shows()
+
             season_stats.total_shows_duration = float(sum([show.duration *
                                                            self.user_list[show.name]['num_watched']
-                                                           for show in show_obj_list]))
+                                                           for show in self.anime_data if show.name
+                                                           in season_stats.show_list.keys()]))
 
     # def _add_favorites_rank(self):
     #     for season_name, season_stats in self._full_stats_sorted_by_fav_avg:
@@ -373,13 +391,15 @@ class SeasonalStats2:
         self.user_list = ListHandler(self.username).anime_list.list
         self.user_list = {show: stats for show, stats in self.user_list.items()
                           if stats['list_status'] == "dropped" or stats['score']}
+
         if self.no_sequels:
             # Filtering out sequels
             self.user_list = {title: stats for title, stats
                               in self.user_list.items()
                               if title in tags.show_tags_dict.keys()}
 
-        self.anime_data = AnimeData.objects.filter(name__in=self.user_list.keys())  # The SQLite DB object
+        self.anime_data = AnimeData.objects.filter(name__in=self.user_list.keys())
+        # The SQLite DB object with data on all anime
 
         self.__initialize_seasonal_stats()
         self._full_stats = self.filter_by_min_shows(self._full_stats)
@@ -388,6 +408,7 @@ class SeasonalStats2:
         self._full_stats.sort_seasons_by_attribute("avg_score")
         for stat in SeasonalStats2.STAT_NAMES:
             self._add_stat(stat)
+        self._full_stats.sort_seasons_by_attribute("name")
 
 
         # self._add_stat("overall_rank")

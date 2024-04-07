@@ -747,7 +747,7 @@ class Model:
                                                                      user, user_row, shows_to_take)
 
         print("Left fetch_predictions")
-        predictions_sorted_by_diff = sorted(predictions, reverse=True, key=lambda x:(x['PredictedScore'] - x['MALScore']))
+        predictions_sorted_by_diff = sorted(predictions, reverse=True, key=lambda x: (x['PredictedScore'] - x['MALScore']))
 
         predictions_no_watched_by_diff = sorted(predictions_no_watched, key=lambda x: (x['PredictedScore'] - x['MALScore']))
         # errors = self.calculate_error(predictions, user.mean_of_watched)

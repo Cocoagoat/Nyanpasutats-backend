@@ -1,19 +1,20 @@
 from __future__ import print_function
 from time import perf_counter
 
-from main.modules.AnimeListHandler import MALListHandler, AnilistHandler
+from main.modules.AnimeListHandler import MALListHandler, AnilistHandler, AnimeListHandler
 
 try:
     import thread
 except ImportError:
     import _thread as thread
-from main.modules.general_utils import time_at_current_point, timeit, list_to_uint8_array
+from main.modules.general_utils import time_at_current_point, timeit, list_to_uint8_array, load_pickled_file
 import numpy as np
 from collections import defaultdict
 from main.modules.UserDB import UserDB
+from main.modules.filenames import scores_dict_filename
 
-import pyximport # Need this to import .pyx files
-pyximport.install(setup_args = {"include_dirs":np.get_include()}) # Need to manually include numpy or it won't work
+import pyximport  # Need this to import .pyx files
+pyximport.install(setup_args={"include_dirs": np.get_include()})  # Need to manually include numpy or it won't work
 from main.modules.gottagofasttest2 import count_common_shows, compute_affinity
 
 
@@ -44,20 +45,28 @@ def find_max_affinity(username, site="MAL", min_common_shows=20):
     user_db = UserDB()
 
     t1 = perf_counter()
-    username_list = list(user_db.scores_dict.keys())
+    # username_list = list(user_db.scores_dict.keys())
 
     # user_list = None
-    if site == "MAL":
-        try:
-            user_list = user_db.scores_dict[username]
-            # Maybe user's already in database and we can save time
-            # Remove this later cause outdated
-        except KeyError:
-            user_list = MALListHandler(username).get_user_scores_list()
-    else:
-        user_list = AnilistHandler(username).get_user_scores_list()
+    # if site == "MAL":
+    #     try:
+    #         user_list = user_db.scores_dict[username]
+    #         # Maybe user's already in database and we can save time
+    #         # Remove this later cause outdated
+    #     except KeyError:
+    #         user_list = MALListHandler(username).get_user_scores_list()
+    # else:
+    #     user_list = AnilistHandler(username).get_user_scores_list()
+    ListHandler = AnimeListHandler.get_concrete_handler(site)
+    user_list = ListHandler(username).get_user_scores_list()
+    # user_list = user_db.scores_dict[username]
+    # if site == "MAL":
+    #     user_list = MALListHandler(username).get_user_scores_list()
+    # else:
+    #     user_list = AnilistHandler(username).get_user_scores_list()
 
     user_list = list_to_uint8_array(user_list)
+
     # if user_list is None:
     #     user_list =
     #     #change this to new style
@@ -69,26 +78,40 @@ def find_max_affinity(username, site="MAL", min_common_shows=20):
     neg_aff_count = 0
     avg_aff = 0
 
-    for i in range(len(user_db.scores_dict)):
-        # This loop calculates the affinity between the main user and every score
-        # list in the dictionary. This is done through Cythonized functions which
-        # dramatically speed up the process (a must since we have 100k+ users to compare with)
-        if username_list[i] == username:
-            continue
-        comparison_list = user_db.scores_dict[username_list[i]]
-        common_shows = count_common_shows(user_list, comparison_list, len(user_list))
-
-        if common_shows > min_common_shows:
-            affinity = compute_affinity(user_list, comparison_list, len(user_list))
-            if np.isnan(affinity):
+    filename = str(scores_dict_filename).split(".")[0]
+    for i in range(100):
+        scores_dict = {}
+        for _ in range(300):
+            try:
+                scores_dict = load_pickled_file(f"{filename}-PP{i+1}.pickle")
+                break
+            except OSError:
                 continue
-            affinities_list[username_list[i]] = {'Affinity': round(affinity*100,2), 'CommonShows': common_shows}
 
-            if affinity > 0:
-                pos_aff_count += 1
-            elif affinity < 0:
-                neg_aff_count += 1
-            avg_aff += affinity*100
+        if not scores_dict:
+            raise OSError("Unable to access scores database. Please try again later.")
+
+        username_list = list(scores_dict.keys())
+        for j in range(len(scores_dict)):
+            # This loop calculates the affinity between the main user and every score
+            # list in the dictionary. This is done through Cythonized functions which
+            # dramatically speed up the process (a must since we have 100k+ users to compare with)
+            if username_list[j] == username:
+                continue
+            comparison_list = scores_dict[username_list[j]]
+            common_shows = count_common_shows(user_list, comparison_list, len(user_list))
+
+            if common_shows > min_common_shows:
+                affinity = compute_affinity(user_list, comparison_list, len(user_list))
+                if np.isnan(affinity):
+                    continue
+                affinities_list[username_list[j]] = {'Affinity': round(affinity*100,2), 'CommonShows': common_shows}
+
+                if affinity > 0:
+                    pos_aff_count += 1
+                elif affinity < 0:
+                    neg_aff_count += 1
+                avg_aff += affinity*100
 
     user_count = len(affinities_list)
     avg_aff /= user_count

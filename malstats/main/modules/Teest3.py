@@ -5,12 +5,12 @@ from pathlib import Path
 from UserDB import UserDB
 from multiprocessing import freeze_support
 import polars as pl
-from main.modules.general_utils import find_duplicates
+from main.modules.general_utils import find_duplicates, timeit
 from main.modules.filenames import *
 from main.modules.Tags import Tags
 from main.models import TaskQueue
 from main.tasks import get_user_seasonal_stats_task
-from main.modules.general_utils import save_pickled_file, load_pickled_file
+from main.modules.general_utils import save_pickled_file, list_to_uint8_array, load_pickled_file
 from main.modules.AffinityDB import AffinityDB
 import random
 from main.modules.AffinityFinder import find_max_affinity
@@ -19,6 +19,7 @@ from main.modules.SeasonalStats2 import SeasonalStats2
 from animisc.celery import app
 from main.modules.AnimeListHandler import MALListHandler, AnilistHandler
 from main.modules.AnimeListFormatter import ListFormatter
+from annoy import AnnoyIndex
 
 
 
@@ -40,9 +41,50 @@ from main.modules.AnimeListFormatter import ListFormatter
 #
 #         i += 1
 
+# @timeit
+# def build_ann_index(scores_dict, n_trees=10):
+#     """
+#     Builds an Annoy index for the given score arrays.
+#
+#     :param score_arrays: A list of numpy arrays, where each array represents user scores.
+#     :param n_trees: The number of trees for the Annoy index. Higher is more accurate, but slower to build.
+#     :return: An AnnoyIndex object.
+#     """
+#     # k = score_arrays[0].shape[0]
+#     k = len(scores_dict[list(scores_dict.keys())[0]])# Assuming all arrays are of the same length
+#     t = AnnoyIndex(k, 'euclidean')  # Using Euclidean distance
+#
+#     # for i, scores in enumerate(score_arrays):
+#     #     t.add_item(i, scores)
+#
+#     for i,(user_name, user_list) in enumerate(scores_dict.items()):
+#         t.add_item(i, user_list)
+#
+#     t.build(n_trees)
+#     return t
+
+
+@timeit
+def find_nearest_neighbors(query_scores, index, num_neighbors):
+    """
+    Finds the nearest neighbors for a given query using the Annoy index.
+
+    :param query_scores: The numpy array of scores for which to find neighbors.
+    :param index: The AnnoyIndex object.
+    :param num_neighbors: The number of nearest neighbors to find.
+    :return: A list of tuples (index, distance) for the nearest neighbors.
+    """
+    return index.get_nns_by_vector(query_scores, num_neighbors, include_distances=True)
+
 
 def main():
     freeze_support()
+    # user_db = UserDB()
+    # scores_dict = user_db.scores_dict
+    # t = build_ann_index(scores_dict)
+    # my_list = MALListHandler("BaronBrixius").get_user_scores_list()
+    # my_list = list_to_uint8_array(my_list)
+    # test = find_nearest_neighbors(my_list, t, 50)
     # find_max_affinity("BaronBrixius")
     # aff_db = AffinityDB()
     # aff_db.create_minor_parts((3,10))
@@ -71,7 +113,7 @@ def main():
     # current_dir = Path(__file__).parent.parent
     # test = find_max_affinity("RedInfinity")
     # print(5)
-    model = Model(model_filename = current_dir.parent / "MLmodels" / current_model_name)
+    # model = Model(model_filename = current_dir.parent / "MLmodels" / current_model_name)
     # test = SeasonalStats.get_user_seasonal_stats("BaronBrixius", "MAL")
     # stats = SeasonalStats2("BaronBrixius", "MAL").full_stats.to_dict()
     # no_seq_stats = SeasonalStats2("BaronBrixius", "MAL", no_sequels=True).full_stats.to_dict()
@@ -83,9 +125,10 @@ def main():
     # test = stats.full_stats
     # test2 = no_seq_stats.full_stats
     # test3 = test.to_dict()
-    test = model.predict_scores("Voltabolt", site="Anilist")
-    test2 = find_max_affinity("Voltabolt", site="Anilist")
-    # test = stats.get_user_seasonal_stats("BaronBrixius", "MAL")
+
+    # test = model.predict_scores("Voltabolt", site="Anilist")
+    test2 = find_max_affinity("BaronBrixius", site="MAL")
+    # test = stats.get_user_seasonal_stats2()
     # test2 = stats.get_user_seasonal_stats("Voltabolt", "Anilist")
 
     # test2 = stats.get_user_seasonal_stats2("BaronBrixius")

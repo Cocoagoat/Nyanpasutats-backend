@@ -271,7 +271,7 @@ class Graphs:
                     current_anime = get_search_results(url)
                     time.sleep(1.2)
                 except (TimeoutError, requests.exceptions.ReadTimeout) as e:
-                    logger.debug(e)
+
                     current_anime = None
                 except UserDoesNotExistError:
                     return
@@ -279,7 +279,7 @@ class Graphs:
             # Add filter for getting none because 404 garbage
             while current_anime is None:  # turn this into decorator later, also change the None to not what we want
                 fail_count += 1
-                logger.warning("Anime was returned as None, sleeping and retrying")
+
                 print(current_anime)
                 time.sleep(30)  # Just in case
                 print("Anime was returned as None, sleeping and retrying")
@@ -287,7 +287,7 @@ class Graphs:
                 current_anime = get_search_results(url)
                 if fail_count == 10:
                     print("Failed to fetch resource 10 times in a row")
-                    logger.debug("Failed to fetch resource 10 times in a row")
+
                     time.sleep(1800)
 
             title = current_anime['title']
@@ -328,7 +328,6 @@ class Graphs:
                     G.add_edge("delet dis", root)
 
                     print(f"Deleting graph. Graph's vertices are {G.vs['name']}")
-                    logger.debug(f"Deleting graph. Graph's vertices are {G.vs['name']}")
 
                 if len(self._all_graphs) % 20 == 0 or MAL_title == relevant_ids_titles[-1][1]:
                     save_pickled_file(data_path / "temp_all_graphs.pickle", self._all_graphs)
@@ -346,7 +345,6 @@ class Graphs:
             self._all_graphs = {}
 
         processed_anime = list(set([x for G in list(self._all_graphs.values()) for x in G.vs['name']]))
-
 
         partial_df_dict = self.anime_db.partial_df.to_dict(as_series=False)
         del partial_df_dict['Rows']

@@ -101,7 +101,7 @@ def get_task_data(request):
         view_logger.error(f"Unable to delete task {task_id}")
     print(1)
     return JsonResponse({'status': 'error',
-                             'data': 'Task was unable to complete on time.'}, status=500)
+                         'data': 'Task was unable to complete on time.'}, status=500)
 
 
 def get_queue_position(request):
@@ -113,10 +113,11 @@ class RecommendationsView(APIView):
     @staticmethod
     def get(request):
         username = request.query_params.get('username')
+        site = request.query_params.get('site')
         if not username:
             return Response({"error": "Username is required"}, status=400)
 
-        task = get_user_recs_task.delay(username)
+        task = get_user_recs_task.delay(username, site)
         TaskQueue.objects.create(task_id=task.id)
         # task_position = len(TaskQueue.objects.all())
 
@@ -132,10 +133,11 @@ class SeasonalStatsView(APIView):
     @staticmethod
     def get(request):
         username = request.query_params.get('username')
+        site = request.query_params.get('site')
         if not username:
             return Response("Username is required", status=400)
 
-        task = get_user_seasonal_stats_task.delay(username)
+        task = get_user_seasonal_stats_task.delay(username, site)
         TaskQueue.objects.create(task_id=task.id)
         # task_position = len(TaskQueue.objects.all())
 
@@ -151,10 +153,11 @@ class AffinityFinderView(APIView):
     @staticmethod
     def get(request):
         username = request.query_params.get('username')
+        site = request.query_params.get('site')
         if not username:
             return Response("Username is required", status=400)
 
-        task = get_user_affs_task.delay(username)
+        task = get_user_affs_task.delay(username, site)
         TaskQueue.objects.create(task_id=task.id)
 
         UsernameCache.objects.get_or_create(username=username)
