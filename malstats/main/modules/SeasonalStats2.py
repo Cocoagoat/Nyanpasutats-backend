@@ -58,7 +58,6 @@ class Season:
         return int(year) + (Seasons[season_name].value/10)
 
 
-
 class SeasonCollection:
     def __init__(self):
         self.seasons = {}

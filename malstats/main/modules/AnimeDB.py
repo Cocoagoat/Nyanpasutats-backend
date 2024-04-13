@@ -1,14 +1,14 @@
 import datetime
 import time
 from polars import ColumnNotFoundError
-from .filenames import *
-from .MAL_utils import Seasons, MediaTypes, MALUtils
+from main.modules.filenames import *
+from main.modules.MAL_utils import Seasons, MediaTypes, MALUtils
 import django
 import os
 import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
-from .general_utils import Sleep
+from main.modules.general_utils import Sleep
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'animisc.settings')
 django.setup()
@@ -120,10 +120,30 @@ class AnimeDB:
         if not isinstance(self._partial_df, pl.DataFrame):
             df_dict = self.df.to_dict(as_series=False)
             titles = [title for title, show_stats in df_dict.items()
-                                       if (title!='Rows' and
-                                       self.show_meets_conditions(show_stats))]
+                      if (title != 'Rows' and
+                      self.show_meets_conditions(show_stats))]
             self._partial_df = self.df.select(["Rows"] + titles)
         return self._partial_df
+
+    def filter_titles(self, meets_conditions_func):
+        df_dict = self.df.to_dict(as_series=False)
+        titles = [title for title, show_stats in df_dict.items()
+                  if (title != 'Rows' and
+                      meets_conditions_func(show_stats))]
+        return titles
+
+    def sort_titles_by_release_date(self, titles):
+        anime_db = self.df.select(titles)
+        df_dict = anime_db.to_dict(as_series=False)
+        stats = {title: {'ID': show_stats[self.stats["ID"]],
+                         'Year': show_stats[self.stats["Year"]],
+                         'Season': show_stats[self.stats["Season"]]
+                         } for title, show_stats in df_dict.items()}
+
+        titles = [title for title, stats in sorted(stats.items(),
+                  key=lambda x: (x[1]['Year'], x[1]['Season']))]
+
+        return titles
 
     @property
     def ids(self):
@@ -199,18 +219,19 @@ class AnimeDB:
             self._years = {title: year for (title, year) in list(zip(self.titles, years_row[1:]))}
         return self._years
 
-    def show_meets_conditions(self,show_stats: dict):
+    def show_meets_conditions(self, show_stats: dict):
         if int(show_stats[self.stats["Scores"]]) >= 2000 \
                 and show_stats[self.stats["Duration"]] * \
                 show_stats[self.stats["Episodes"]] >= 15\
-                and show_stats[self.stats["Duration"]]>=2\
-                and show_stats[self.stats["Mean Score"]]>=6.5:
+                and show_stats[self.stats["Duration"]] >= 2\
+                and show_stats[self.stats["Mean Score"]] >= 6.5:
                 # and show_stats[self.stats["Year"]]>=2021 \
                 # and show_stats[self.stats["Year"]]<=2022:
             return True
         return False
 
-
+    def get_id_by_title(self, title):
+        return self.df[title][self.stats['ID']]
 
     def get_stats_of_shows(self, show_list, relevant_stats: list):
         """ Will create a dictionary that has every show in show_list as the key, and every stat in relevant_stats
@@ -360,3 +381,80 @@ class AnimeDB:
             page_num += 1
         table = pa.Table.from_pydict(anime_data_dict)
         pq.write_table(table, anime_database_name)  # This creates a .parquet file from the dict
+
+    def are_separate_shows(self, show1: str, show2: str, relation_type: str):
+        """ This method tries to determine whether two entries that are related in some way on MAL
+        are the same show, or two different shows.
+
+        Note : The methodology used here is very rough, and relies purely on how the shows are related
+        to each other, their media type, and their length. There are two reasons for this :
+
+        1) Even the definition of same show vs different shows is very rough - for example,
+        is Fate/Zero the same show as Fate/Unlimited Blade Works? Is A Certain Magical Index
+        the same show as A Certain Scientific Railgun?
+
+        2) Even if you count Fate/Zero and Fate/UBW as different shows, there is literally no way
+        to separate them going purely by their MAL entries. Fate/UBW is listed as a sequel of Fate/Zero,
+        both are full-length TV shows, and both have a very sizeable watcher amount. There are multiple cases
+        of shows like these where it's simply impossible to separate them due to how MAL classifies them
+        (sometimes outright misclassifies, like putting alternative_version (which should NOT count as a
+        separate show, since alternative version is basically the same show but made in a different time/
+        from a different perspective) instead of alternative_setting (which usually means same universe but
+        completely different characters, and would almost always be a different show).
+
+        In short, we can only rely on non-fully-accurate MAL data to separate what would be difficult
+        even for humans to agree on, so this won't be 100% precise.
+
+         """
+
+        def both_shows_are_TV():
+            return show_stats[show1]["Type"] == 1 and show_stats[show2]["Type"] == 1
+
+        def both_shows_are_movies():
+            return show_stats[show1]["Type"] == 2 and show_stats[show2]["Type"] == 2
+
+        def show_is_longer_than(minutes, name):
+            if not show_stats[name]["Episodes"]:
+                show_stats[name]["Episodes"] = 1
+            # if show_stats[name]["Duration"]==1:
+            #     show_stats[name]["Duration"]=65
+            return show_stats[name]["Duration"] * show_stats[name]["Episodes"] > minutes
+
+        if show1 not in self.titles or show2 not in self.titles:  # take care of this outside later
+            return True
+
+        relevant_stats = ["Duration", "Episodes", "Type"]
+        show_stats = self.get_stats_of_shows([show1, show2], relevant_stats)
+        # Put these into the 3rd case^
+        if relation_type in ['sequel', 'prequel', 'alternative_version', 'summary']:
+            # Sequels, prequels, alternative versions and summaries are never separate shows
+            return False
+
+        if relation_type == 'character':
+            # "character" means that the only common thing between the two shows is that some of
+            # the characters are mutual. It will always be a separate show, or something very short
+            # that isn't in the partial database in the first place.
+            return True
+
+        if relation_type in ['other', 'side_story', 'spin_off']:  # add parent?
+            # This is the most problematic case. MAL is very inconsistent with how it labels things
+            # as "other", "side story" or "spin-off". The latter two are used almost interchangeably,
+            # and "other" can be used for pretty much ANYTHING. Side stories/spin-offs, commercials,
+            # even crossovers. There is no feasible way to catch literally every case, but this gets
+            # the vast majority of them.
+            if both_shows_are_TV() or both_shows_are_movies() or \
+                    (show_is_longer_than(144, show1) and show_is_longer_than(144, show2)):
+                return True  # Add a search for what sequels are?
+            return False
+
+        if relation_type == 'alternative_setting':
+                # Alternative setting almost always means that the shows are set in the same universe,
+                # but have different stories or even characters. Sometimes it can also be used for
+                # miscellanous related shorts, which is why I made a small (arbitrary) length requirement
+                # for the shows to be counted as separate.
+
+            if (show_is_longer_than(60, show1) and show_is_longer_than(60, show2)):
+                return True
+            return False
+
+        return False

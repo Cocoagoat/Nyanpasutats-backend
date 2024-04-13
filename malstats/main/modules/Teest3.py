@@ -5,6 +5,7 @@ from pathlib import Path
 from UserDB import UserDB
 from multiprocessing import freeze_support
 import polars as pl
+from AnimeDB import AnimeDB
 from main.modules.general_utils import find_duplicates, timeit
 from main.modules.filenames import *
 from main.modules.Tags import Tags
@@ -20,6 +21,7 @@ from animisc.celery import app
 from main.modules.AnimeListHandler import MALListHandler, AnilistHandler
 from main.modules.AnimeListFormatter import ListFormatter
 from annoy import AnnoyIndex
+from Graphs2 import Graphs2
 
 
 
@@ -125,7 +127,11 @@ def main():
     # test = stats.full_stats
     # test2 = no_seq_stats.full_stats
     # test3 = test.to_dict()
+    graphs = Graphs2()
+    # test = graphs.all_graphs
 
+    test2 = graphs.all_graphs
+    test = graphs.all_graphs_no_low_scores
     # test = model.predict_scores("Voltabolt", site="Anilist")
     test2 = find_max_affinity("BaronBrixius", site="MAL")
     # test = stats.get_user_seasonal_stats2()

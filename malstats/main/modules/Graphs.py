@@ -146,7 +146,7 @@ class Graphs:
             # that isn't in the partial database in the first place.
             return True
 
-        if relation_type in  ['other', 'side_story', 'spin_off']:  # add parent?
+        if relation_type in ['other', 'side_story', 'spin_off']:  # add parent?
             # This is the most problematic case. MAL is very inconsistent with how it labels things
             # as "other", "side story" or "spin-off". The latter two are used almost interchangeably,
             # and "other" can be used for pretty much ANYTHING. Side stories/spin-offs, commercials,
@@ -223,7 +223,6 @@ class Graphs:
         members_of_each_show = self.anime_db.get_stats_of_shows(G.vs['name'], ['Scores'])
         # Return the entry which the maximum amount of people watched out of all related entries
         return max(members_of_each_show, key=lambda x: members_of_each_show[x]['Scores'])
-
 
     def find_related_entries(self, show_name):
         if show_name in self.related_shows.keys():
