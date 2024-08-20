@@ -1,3 +1,5 @@
+from datetime import timedelta, datetime
+
 from django.db import models
 from .model_managers import RetryManager
 from django.db.utils import OperationalError
@@ -27,6 +29,26 @@ class AnimeData(models.Model):
     objects = RetryManager()  # To avoid I/O conflicts from concurrent requests since we're using SQLite
 
 
+class AnimeDataUpdated(models.Model):
+    updated_at = models.DateTimeField(auto_now=True)
+    mal_id = models.IntegerField()
+    mean_score = models.DecimalField(max_digits=3, decimal_places=2)
+    scores = models.IntegerField()
+    members = models.IntegerField()
+    episodes = models.PositiveSmallIntegerField(null=True)
+    duration = models.DecimalField(max_digits=5, decimal_places=2, null=True)
+    type = models.CharField(max_length=10, null=True)
+    year = models.PositiveSmallIntegerField(null=True)
+    season = models.PositiveSmallIntegerField(null=True)
+    name = models.CharField(max_length=300)
+    image_url = models.CharField(max_length=200, null=True)
+
+    def __str__(self):
+        return f"{self.name} (Updated)"
+
+    objects = RetryManager()
+
+
 class TaskQueue(models.Model):
     task_id = models.CharField(max_length=50, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -54,6 +76,12 @@ class TaskQueue(models.Model):
 class UsernameCache(models.Model):
     username = models.CharField(max_length=30, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            self.expires_at = datetime.now() + timedelta(hours=2)  # Example TTL of 2 hours
+        super(UsernameCache, self).save(*args, **kwargs)
 
     objects = RetryManager()
 

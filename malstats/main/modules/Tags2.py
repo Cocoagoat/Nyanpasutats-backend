@@ -1,17 +1,8 @@
-import os
-
-import requests
-from polars import ColumnNotFoundError
-
 from .filenames import *
-# from .general_utils import *
+from .general_utils import *
 from .MAL_utils import *
 from .AnimeDB import AnimeDB
-from .Graphs2 import Graphs2
 from sortedcollections import OrderedSet
-
-from .general_utils import load_pickled_file, save_pickled_file, split_list_interval
-
 
 # Class currently a bit of a mess, will refactor in the future
 
@@ -74,9 +65,7 @@ class Tags:
         if cls._instance is None:
             cls._instance = super().__new__(cls, *args, **kwargs)
             cls._instance._entry_tags_dict = {}
-            cls._instance._entry_tags_dict_nls = {}
             cls._instance._show_tags_dict = {}
-            cls._instance._show_tags_dict_nls = {}
             cls._instance._entry_tags_dict2 = {}
             cls._instance._tags_per_category = {}
             cls._instance._anime_db = AnimeDB()
@@ -87,30 +76,19 @@ class Tags:
             cls._instance._all_studios = []
             cls._instance._all_doubletags = []
             cls._instance._single_tags_used_for_doubles = []
-            cls._instance.graphs = Graphs2()
+            cls._instance.graphs = Graphs()
             # try:
             #     cls._instance.data = load_pickled_file(data_path / "general_data.pickle")
             # except FileNotFoundError:
             #     cls._instance.data = GeneralData().generate_data()
             cls._instance.tag_types = ["Single", "Double"]
-            cls._tags_to_include = []
-            # data = load_pickled_file(data_path / "general_data.pickle")
-            # cls.tags_to_include = data.OG_aff_means.keys()
+            data = load_pickled_file(data_path / "general_data.pickle")
+            cls.tags_to_include = data.OG_aff_means.keys()
         return cls._instance
 
     def __init__(self):
         # All properties are loaded on demand
         pass
-
-    @property
-    def tags_to_include(self):
-        if not self._tags_to_include and os.path.exists(data_path / "general_data.pickle"):
-            data = load_pickled_file(data_path / "general_data.pickle")
-            try:
-                self._tags_to_include = data.OG_aff_means.keys()
-            except AttributeError:
-                self._tags_to_include = True
-        return self._tags_to_include
 
     @property
     def entry_tags_dict(self):
@@ -125,18 +103,6 @@ class Tags:
         return self._entry_tags_dict
 
     @property
-    def entry_tags_dict_nls(self):
-        if not self._entry_tags_dict_nls:
-            try:
-                self._entry_tags_dict_nls = load_pickled_file(entry_tags_nls_filename)
-            except FileNotFoundError:
-                relevant_titles = self.graphs.all_graphs_no_low_scores.all_titles
-                self._entry_tags_dict_nls = {entry: entry_tags for entry, entry_tags in
-                                             self.entry_tags_dict.items() if entry in relevant_titles}
-                save_pickled_file(entry_tags_nls_filename, self._entry_tags_dict_nls)
-        return self._entry_tags_dict_nls
-
-    @property
     def entry_tags_dict2(self):
         if not self._entry_tags_dict2:
             try:
@@ -149,26 +115,11 @@ class Tags:
         return self._entry_tags_dict2
 
     @property
-    def show_tags_dict_nls(self):
-        if not self._show_tags_dict_nls:
-            try:
-                self._show_tags_dict_nls = load_pickled_file(shows_tags_nls_filename)
-            except FileNotFoundError:
-                self.get_shows_tags(no_low_scores=True)
-                self._show_tags_dict_nls = load_pickled_file(shows_tags_nls_filename)
-                del self._show_tags_dict  # workaround
-                # relevant_titles = self.graphs.all_graphs_no_low_scores.all_titles
-                # self._show_tags_dict_nls = {show: show_tags for show, show_tags in
-                #                             self.show_tags_dict.items() if show in relevant_titles}
-                # save_pickled_file(shows_tags_nls_filename, self._show_tags_dict_nls)
-        return self._show_tags_dict_nls
-
-    @property
     def show_tags_dict(self):
         if not self._show_tags_dict:
             try:
                 print("Loading shows-tags dictionary")
-                self._show_tags_dict = load_pickled_file(shows_tags_filename)
+                self._show_tags_dict = load_pickled_file(shows_tags_nls_filename)
                 print("Shows-tags dictionary loaded successfully")
             except FileNotFoundError:
                 print("Shows-tags dictionary not found. Creating new shows-tags dictionary")
@@ -179,8 +130,8 @@ class Tags:
     def all_anilist_tags(self):
         if not self._all_anilist_tags:
             self._all_anilist_tags = self.all_single_tags + self.all_genres + self.all_studios + self.all_doubletags
-            self._all_anilist_tags = [x for x in self._all_anilist_tags if (
-                    self.tags_to_include == True or x in self.tags_to_include)]
+            self._all_anilist_tags = [x for x in self._all_anilist_tags if x in self.tags_to_include]
+            #remove after debugging
         return self._all_anilist_tags
 
     @property
@@ -218,50 +169,48 @@ class Tags:
         :return: A dictionary of categories, with each category having a separate group of tags in a list.
         """
         if not self._tags_per_category:
-            allowed_categories = ['Cast-Main Cast', 'Cast-Traits', 'Sexual Content', 'Setting-Scene', 'Demographic',
-                                  'Setting-Time', 'Setting-Universe']
-            self._tags_per_category = {x['category']: [] for entry in self.entry_tags_dict_nls.keys()
-                                       for x in self.entry_tags_dict_nls[entry]['Tags']}
+            self._tags_per_category = {x['category']: [] for entry in self.entry_tags_dict.keys()
+                                       for x in self.entry_tags_dict[entry]['Tags']}
 
-            for entry in self.entry_tags_dict_nls.keys():
-                for tag in self.entry_tags_dict_nls[entry]['Tags']:
+            for entry in self.entry_tags_dict.keys():
+                for tag in self.entry_tags_dict[entry]['Tags']:
                     if tag['name'] not in self._tags_per_category[tag['category']]:
                         self._tags_per_category[tag['category']].append(tag['name'])
 
-            test = self._tags_per_category
             themes = [x for key, value in self._tags_per_category.items()
                       for x in value if key.startswith("Theme")]
             if "Episodic" in self._tags_per_category['Technical']:
                 themes.append("Episodic")
             del self._tags_per_category['Technical']
 
-            leftover_tags = []
             for key in list(self._tags_per_category.keys()):
                 if key.startswith("Theme"):
                     del self._tags_per_category[key]
 
-                elif key not in allowed_categories:
-                    for tag in self._tags_per_category[key]:
-                        leftover_tags.append(tag)
-                    del self._tags_per_category[key]
-
-
             split_themes = split_list_interval(themes, 10)
-            theme_dict = {f"Themes-{i + 1}": split_themes[i] for i in range(len(split_themes))}
-            k = 10
-            for tag in leftover_tags:
-                if k == 0:
-                    k = 10
-                theme_dict[f"Themes-{k}"].append(tag)
-                k -= 1
 
             doubles = self.get_full_doubletags_list(sorted=True)
+
             split_doubles = split_list_interval(doubles, 30)
+
+            theme_dict = {f"Themes-{i + 1}": split_themes[i] for i in range(len(split_themes))}
+
             doubles_dict = {f"Doubles-{i + 1}": split_doubles[i] for i in range(len(split_doubles))}
-            doubles_dict2 = {"Doubles": doubles}
+            doubles_dict2 = {"Doubles": doubles}  # This will take effect after resetting db, use later
+            # tag_counts = self.get_single_tag_counts()
+            # relevant_tags = []
 
-            self._tags_per_category = self._tags_per_category | theme_dict | doubles_dict2   #| doubles_per_tag
+            # for tag, count in tag_counts.items():
+            #     if count >= tag_counts['Thriller']:  # last genre
+            #         relevant_tags.append(tag)
+            #     else:
+            #         break
 
+            # doubles_per_tag = {f"Doubles-{tag}" : [double_tag
+            #                                              for double_tag in doubles if f"<{tag}>"
+            #                                              in double_tag] for tag in relevant_tags}
+
+            self._tags_per_category = self._tags_per_category | theme_dict | doubles_dict   #| doubles_per_tag
         return self._tags_per_category
 
     def get_category_tag_type(self, category):
@@ -287,11 +236,10 @@ class Tags:
         #     banned_tags = file.read().splitlines()
         banned_tags = self.get_banned_tags()
         tags = OrderedSet()
-        for show, show_dict in self.entry_tags_dict_nls.items():
+        for show, show_dict in self.entry_tags_dict.items():
             if 'Tags' in show_dict:
                 for tag_dict in show_dict['Tags']:
-                    if tag_dict['name'] not in banned_tags and (
-                            self.tags_to_include == True or tag_dict['name'] in self.tags_to_include):
+                    if tag_dict['name'] not in banned_tags and tag_dict['name'] in self.tags_to_include:
                         tags.add(tag_dict['name'])
         return list(tags)
 
@@ -300,7 +248,7 @@ class Tags:
         # as well as checks how often they appear."""
         tag_counts = {}
         banned_tags = self.get_banned_tags()
-        for entry, entry_data in self.entry_tags_dict.items():
+        for entry, entry_data in self._entry_tags_dict.items():
             tags_genres = self.gather_tags_and_genres(entry_data)
             for tag in tags_genres:  # Genres are strings, tags are dictionaries with ['name'] and ['percentage']
                 tag_name = tag['name'] if type(tag) is dict else tag
@@ -322,7 +270,7 @@ class Tags:
                 for genre in show_dict['Genres']:
                     genres.add(genre)
 
-        genres = [x for x in genres if self.tags_to_include == True or x in self.tags_to_include]
+        genres = [x for x in genres if x in self.tags_to_include]
         return list(genres)
 
     def get_full_studios_list(self):
@@ -342,7 +290,7 @@ class Tags:
             if amount_of_shows >= 30 or studio in extra_studios:
                 studios.add(studio)
 
-        studios = [x for x in studios if self.tags_to_include == True or x in self.tags_to_include]
+        studios = [x for x in studios if x in self.tags_to_include]
         return list(studios)
 
     def get_full_doubletags_list(self, sorted=False):
@@ -355,7 +303,7 @@ class Tags:
         else:
             double_tag_counts = self.get_double_tag_counts(only_relevant=True)
             double_tags = double_tag_counts.keys()
-        double_tags = [x for x in double_tags if self.tags_to_include == True or x in self.tags_to_include]
+        double_tags = [x for x in double_tags if x in self.tags_to_include]
         return list(double_tags)
 
     def get_double_tag_counts(self, only_relevant=True):
@@ -469,7 +417,7 @@ class Tags:
 
             if title in relevant_shows:
                 try:
-                    main_entry, _ = self.graphs.all_graphs.find_related_entries(title)
+                    main_entry, _ = self.graphs.find_related_entries(title)
                 except TypeError:
                     print("Error finding related entry in graphs")
                     return
@@ -477,7 +425,7 @@ class Tags:
                 entry_data = {
                     "Tags": [{"name": tag["name"], "percentage": self.adjust_tag_percentage(tag["rank"]),
                               "category": tag["category"]} for tag in entry["tags"]
-                             if tag["rank"] >= 60 and tag['name'] not in banned_tags],
+                             if tag["rank"] >= 60 and tag['name'] not in banned_tags and tag['name'] in tags_to_include],
                     "Genres": entry["genres"],
                     "Studio": entry["studios"]["nodes"][0]["name"] if entry["studios"]["nodes"] else None,
                     "Recommended": show_recommendations,
@@ -487,8 +435,8 @@ class Tags:
                 return title, entry_data
 
         anime_db = AnimeDB()
-        # data = load_pickled_file(data_path / "general_data.pickle")
-        # tags_to_include = data.OG_aff_means.keys()
+        data = load_pickled_file(data_path / "general_data.pickle")
+        tags_to_include = data.OG_aff_means.keys()
         banned_tags = self.get_banned_tags()
         # with open("NSFWTags.txt", 'r') as file:
         #     # Banned tags are mostly NSFW stuff that doesn't exist in regular shows
@@ -497,8 +445,7 @@ class Tags:
         ids = anime_db.df.row(anime_db.stats['ID'])[1:]
         has_next_page = True
         page_num = 1
-        # relevant_shows = anime_db.partial_df.columns
-        relevant_shows = self.graphs.all_graphs.all_titles
+        relevant_shows = anime_db.partial_df.columns
 
 
         # First, we create entry_tags_dict. This dictionary has the tag-related details of each RELEVANT
@@ -575,7 +522,7 @@ class Tags:
             for tag in genres_studios:
                 self._entry_tags_dict2[entry][tag] = {'percentage': 1}
 
-    def get_shows_tags(self, no_low_scores=False):
+    def get_shows_tags(self):
         def calc_length_coeff(entry, stats):
             return round(min(1, stats[entry]["Episodes"] *
                        stats[entry]["Duration"] / 200),3)
@@ -585,11 +532,11 @@ class Tags:
             if not double:
                 all_entries_tags_list = [{'name': tag['name'], 'percentage': tag['percentage']}
                                          for entry in show_related_entries
-                                         for tag in entry_tags_dict[entry]['Tags']]
+                                         for tag in self.entry_tags_dict[entry]['Tags']]
             else:
                 all_entries_tags_list = [{'name': double_tag['name'], 'percentage': double_tag['percentage']}
                                          for entry in show_related_entries
-                                         for double_tag in entry_tags_dict[entry]['DoubleTags']]
+                                         for double_tag in self.entry_tags_dict[entry]['DoubleTags']]
             for tag in all_entries_tags_list:
                 if tag['name'] not in show_tags or tag['percentage'] > show_tags[tag['name']]:
                     # Each tag a show has gets the maximum value of said tag among its entries
@@ -601,7 +548,7 @@ class Tags:
         def get_recommended_shows():
             show_recommended = {}
             for entry in show_related_entries:
-                entry_recommended = entry_tags_dict[entry]['Recommended']
+                entry_recommended = self.entry_tags_dict[entry]['Recommended']
                 for rec_entry, rec_value in entry_recommended.items():
                     if rec_entry not in show_recommended:
                         show_recommended[rec_entry] = rec_value
@@ -614,11 +561,11 @@ class Tags:
                                                                  key=lambda x: x[1], reverse=True)}
             return show_recommended
 
-        entry_tags_dict = self.entry_tags_dict_nls if no_low_scores else self.entry_tags_dict
+
         processed_titles = []
-        show_amount = len(entry_tags_dict.keys())
+        show_amount = len(self.entry_tags_dict.keys())
         anime_db = AnimeDB()
-        for i, entry in enumerate(entry_tags_dict.keys()):
+        for i, entry in enumerate(self.entry_tags_dict.keys()):
 
             # print(show)
             if i % 100 == 0:
@@ -629,7 +576,7 @@ class Tags:
                 continue
 
             try:
-                main_entry, show_related_entries = self.graphs.all_graphs.find_related_entries(entry)
+                main_entry, show_related_entries = self.graphs.find_related_entries(entry)
             except TypeError:
                 continue  # Some entries exist on MAL, but not on Anilist (and thus they do not appear
             # in the tags dictionary which is built using Anilist's tags). Those entries
@@ -637,7 +584,7 @@ class Tags:
             # would not want to analyze either way.
 
             show_related_entries = [entry for entry in show_related_entries
-                                    if entry in entry_tags_dict.keys()]
+                                    if entry in self.entry_tags_dict.keys()]
 
             #
             # all_entries_tags_list = [{tag['name']: tag['percentage']} for entry in show_related_entries
@@ -676,7 +623,7 @@ class Tags:
 
             # Genres (simply add all the unique genres of all the entries)
             show_genres = list(set([genre for entry in show_related_entries
-                                    for genre in entry_tags_dict[entry]['Genres']]))
+                                    for genre in self.entry_tags_dict[entry]['Genres']]))
             self._show_tags_dict[main_entry]['Genres'] = show_genres
 
             # Studios (same as genres)
@@ -698,7 +645,7 @@ class Tags:
 
             # Related
             stats_of_related_entries = anime_db.get_stats_of_shows(show_related_entries,
-                                                                   ["Episodes", "Duration"])
+                                                                        ["Episodes", "Duration"])
             related = {}
             for entry in show_related_entries:
                 length_coeff = calc_length_coeff(entry, stats_of_related_entries)
@@ -712,22 +659,21 @@ class Tags:
             # # Doubles
             # show_double_tags=[]
             # all_entries_double_tags_list = [{tag['name']: tag['percentage']} for entry in show_related_entries
-            #                                 for double_tag in self.entry_tags_dict[entry]['DoubleTags']]
+            #                                 for double_tag in self.entry_tags_dict[entry]['Doubles']]
             # for tag in all_entries_double_tags_list:
             #     if tag['name'] not in show_tags or tag['percentage'] > show_tags[tag['name']]:
             #         # Each tag a show has gets the maximum value of said tag among its entries
             #         show_double_tags[tag['name']] = tag['percentage']
-            # show_double_tags = {tag[0]: tag[1] for tag in sorted(show_double_tags,
+            # show_double_tags = {tag[0]: tag[1] for tag in sorted(show_double_tags.items(),
             #                                               key=lambda x: x[1], reverse=True)}
             #
-            # self._show_tags_dict[main_entry]['DoubleTags'] = [{'name': tag_name, 'percentage': tag_p}
-            #                                                for tag_name, tag_p in show_double_tags]
+            # self._show_tags_dict[main_entry]['Doubles'] = [{'name': tag_name, 'percentage': tag_p}
+            #                                                for tag_name, tag_p in show_double_tags.items()]
 
             # To avoid repeat processing
             processed_titles = processed_titles + show_related_entries
 
-        filename = shows_tags_nls_filename if no_low_scores else shows_tags_filename
-        save_pickled_file(filename, self._show_tags_dict)
+        save_pickled_file(shows_tags_nls_filename, self._show_tags_dict)
         # save_pickled_file(entry_tags_filename, self._entry_tags_dict)
 
     # def shows_per_tag(self):
@@ -778,7 +724,7 @@ class Tags:
         """
 
         max_score = scores[show]#.item()
-        for entry, length_coeff in self.show_tags_dict_nls[show]['Related'].items():
+        for entry, length_coeff in self.show_tags_dict[show]['Related'].items():
             if length_coeff == 1 and entry != show:
                 try:
                     max_score = max(scores[entry], max_score)

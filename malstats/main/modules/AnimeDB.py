@@ -1,5 +1,5 @@
 import datetime
-import time
+import shutil
 from polars import ColumnNotFoundError
 from main.modules.filenames import *
 from main.modules.MAL_utils import Seasons, MediaTypes, MALUtils
@@ -8,11 +8,10 @@ import os
 import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
-from main.modules.general_utils import Sleep
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'animisc.settings')
 django.setup()
-from main.models import AnimeData
+from main.models import AnimeData, AnimeDataUpdated
 
 
 class AnimeDB:
@@ -32,7 +31,6 @@ class AnimeDB:
     Note : The above-mentioned fields are rows, not columns, for easier synchronization with UserDB.
 
     """
-    _instance = None
 
     # ┌──────┬────────────┬────────────┬───────────┬───┬──────────┬────────────┬────────────┬────────────┐
     # │ Rows ┆ Fullmetal  ┆ Bleach:    ┆ Steins;Ga ┆ … ┆ Kokuhaku ┆ Hametsuno  ┆ Utsu       ┆ Tenkuu     │
@@ -60,7 +58,9 @@ class AnimeDB:
     # │ on   ┆            ┆            ┆           ┆   ┆          ┆            ┆            ┆            │
     # └──────┴────────────┴────────────┴───────────┴───┴──────────┴────────────┴────────────┴────────────┘
 
+    _instance = None
     # noinspection DuplicatedCode
+
     def __new__(cls, *args, **kwargs):
         """The class is a Singleton - we only need one instance of it since its purpose is
         to house and create on demand all the data structures that are used in this project."""
@@ -104,7 +104,11 @@ class AnimeDB:
     @property
     def df_metadata(self):
         if not self._df_metadata:
-            self._df_metadata = pq.ParquetFile(anime_database_name)
+            try:
+                self._df_metadata = pq.ParquetFile(anime_database_name)
+            except FileNotFoundError:
+                self.generate_anime_DB()
+                self._df_metadata = pq.ParquetFile(anime_database_name)
         return self._df_metadata
 
     @property
@@ -254,7 +258,7 @@ class AnimeDB:
                 stats_dict[show] = show_dict
         return stats_dict
 
-    def generate_anime_DB(self, non_sequels_only=False):
+    def generate_anime_DB(self, non_sequels_only=False, update=False):
 
         def create_anime_DB_entry(anime):
             # Helper function, creates a list which will later serve as a column in the anime DB.
@@ -310,21 +314,25 @@ class AnimeDB:
                 image_url = anime['node']['main_picture']['medium']
             except KeyError:
                 image_url = ""
-            # For now I only need the image url in SQLite form, everything else is only used
-            # by internal scripts which are built for .parquet databases
-            # new_entry = AnimeData(image_url=anime['node']['main_picture']['medium'])
-            # anime_data = AnimeData.objects.get_or_create(name=title, image_url=image_url)
 
             anime_data_for_db = anime_data + [title, image_url]
             db_fields = ['mal_id', 'mean_score', 'scores', 'members', 'episodes', 'duration', 'type', 'year', 'season',
                          'name', 'image_url']
             anime_db_dict = dict(zip(db_fields, anime_data_for_db))
-            print(anime_db_dict)
-            AnimeData.objects.get_or_create(**anime_db_dict)
 
-            # new_entry.save()
-
+            mal_id = anime_db_dict.pop('mal_id')
+            AnimeSQLDB.objects.update_or_create(
+                mal_id=mal_id,
+                defaults=anime_db_dict
+            )
             return title  # Title is returned to check whether we reached the last show
+
+        if update:
+            AnimeSQLDB = AnimeDataUpdated
+            filename = anime_database_updated_name
+        else:
+            AnimeSQLDB = AnimeData
+            filename = anime_database_name
 
         last_show_reached = False
         last_show = 'Tenkuu Danzai'
@@ -338,11 +346,7 @@ class AnimeDB:
                                "media_type", "start_season", "start_date"]
 
         fields_no_edit_needed = ["id", "mean", "num_scoring_users", "num_list_users"]
-
         # The fields we need from the JSON object containing information about a single anime.
-
-        # anime_data_dict = {'Rows': ['ID', 'Mean Score', 'Scores',
-        #                             'Members', 'Episodes', 'Duration', 'Type', 'Year', 'Season']}
 
         stat_names = list(self.stats.keys())
         anime_data_dict = {'Rows': stat_names}
@@ -351,26 +355,13 @@ class AnimeDB:
         while not last_show_reached:
             # We loop over pages of anime info that we get from the Jikan API (the info is
             # sorted by score, from highest to lowest) until we reach the lowest rated show.
-            # There should be 25 shows per page/batch.
+            # There should be 100 shows per page/batch.
 
             anime_batch = MALUtils.get_anime_batch_from_MAL(page_num, url_required_fields)
             try:
                 print(f"Currently on score {anime_batch['data'][-1]['node']['mean']}")
             except KeyError:
                 print("Finished")
-            while anime_batch is None:
-                # If we failed to get the batch for some reason, we retry until it's a success.
-                # Jikan API does not require authorization, so the only reason for a failure
-                # could be an outage in the API itself, in which case we wouldn't want to
-                # timeout/stop the function as an outage could technically last for a few hours,
-                # or even days.
-                print("Error - unable to get batch. Sleeping just to be safe, "
-                      "then trying again.")
-                # logging.error("Error - unable to get batch. Sleeping just to be safe, "
-                #               "then trying again.")
-                time.sleep(Sleep.LONG_SLEEP)
-                anime_batch = MALUtils.get_anime_batch_from_MAL(page_num, url_required_fields)
-                print(anime_batch)
 
             for anime in anime_batch["data"]:
                 if not non_sequels_only:
@@ -380,7 +371,9 @@ class AnimeDB:
                     break
             page_num += 1
         table = pa.Table.from_pydict(anime_data_dict)
-        pq.write_table(table, anime_database_name)  # This creates a .parquet file from the dict
+        pq.write_table(table, filename)  # This creates a .parquet file from the dict
+        if filename == anime_database_name:
+            shutil.copy(anime_database_name, anime_database_updated_name)
 
     def are_separate_shows(self, show1: str, show2: str, relation_type: str):
         """ This method tries to determine whether two entries that are related in some way on MAL
@@ -407,26 +400,22 @@ class AnimeDB:
 
          """
 
-        def both_shows_are_TV():
-            return show_stats[show1]["Type"] == 1 and show_stats[show2]["Type"] == 1
-
-        def both_shows_are_movies():
-            return show_stats[show1]["Type"] == 2 and show_stats[show2]["Type"] == 2
+        # def both_shows_are_TV():
+        #     return show_stats[show1]["Type"] == 1 and show_stats[show2]["Type"] == 1
+        #
+        # def both_shows_are_movies():
+        #     return show_stats[show1]["Type"] == 2 and show_stats[show2]["Type"] == 2
 
         def show_is_longer_than(minutes, name):
             if not show_stats[name]["Episodes"]:
                 show_stats[name]["Episodes"] = 1
-            # if show_stats[name]["Duration"]==1:
-            #     show_stats[name]["Duration"]=65
             return show_stats[name]["Duration"] * show_stats[name]["Episodes"] > minutes
 
         if show1 not in self.titles or show2 not in self.titles:  # take care of this outside later
-            return True
+            return False
 
-        relevant_stats = ["Duration", "Episodes", "Type"]
-        show_stats = self.get_stats_of_shows([show1, show2], relevant_stats)
         # Put these into the 3rd case^
-        if relation_type in ['sequel', 'prequel', 'alternative_version', 'summary']:
+        if relation_type in ['sequel', 'prequel', 'summary']:
             # Sequels, prequels, alternative versions and summaries are never separate shows
             return False
 
@@ -436,22 +425,24 @@ class AnimeDB:
             # that isn't in the partial database in the first place.
             return True
 
-        if relation_type in ['other', 'side_story', 'spin_off']:  # add parent?
+        relevant_stats = ["Duration", "Episodes", "Type"]
+        show_stats = self.get_stats_of_shows([show1, show2], relevant_stats)
+
+        if relation_type in ['other', 'side_story', 'alternate_version', 'spin_off', 'parent_story']:
             # This is the most problematic case. MAL is very inconsistent with how it labels things
             # as "other", "side story" or "spin-off". The latter two are used almost interchangeably,
             # and "other" can be used for pretty much ANYTHING. Side stories/spin-offs, commercials,
             # even crossovers. There is no feasible way to catch literally every case, but this gets
             # the vast majority of them.
-            if both_shows_are_TV() or both_shows_are_movies() or \
-                    (show_is_longer_than(144, show1) and show_is_longer_than(144, show2)):
+            if show_is_longer_than(150, show1) and show_is_longer_than(150, show2):
                 return True  # Add a search for what sequels are?
             return False
 
         if relation_type == 'alternative_setting':
-                # Alternative setting almost always means that the shows are set in the same universe,
-                # but have different stories or even characters. Sometimes it can also be used for
-                # miscellanous related shorts, which is why I made a small (arbitrary) length requirement
-                # for the shows to be counted as separate.
+            # Alternative setting almost always means that the shows are set in the same universe,
+            # but have different stories or even characters. Sometimes it can also be used for
+            # miscellanous related shorts, which is why I made a small (arbitrary) length requirement
+            # for the shows to be counted as separate.
 
             if (show_is_longer_than(60, show1) and show_is_longer_than(60, show2)):
                 return True

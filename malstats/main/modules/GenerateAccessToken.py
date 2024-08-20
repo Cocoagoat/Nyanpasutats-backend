@@ -49,13 +49,3 @@ def get_access_token():
     print(access_token)
     return access_token
 
-# def get_headers():
-#     headers = {}
-#     # with open('Authorization.txt', "r") as f:
-#     with open(auth_filename) as f:
-#         headers_list = f.read().splitlines()
-#         if headers_list:
-#             headers['Authorization'] = headers_list[0]
-#             headers['refresh_token'] = headers_list[1]
-#         headers['content-type'] = 'application/x-www-form-urlencoded'
-#     return headers

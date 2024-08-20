@@ -1,189 +1,36 @@
 import os
+from random import random
+import numpy as np
+import pandas as pd
+import polars as pl
+import pyarrow.parquet as pq
+from polars import ColumnNotFoundError
 from tqdm import tqdm
-from .general_utils import *
-# Maybe no need for this?^
-from .AnimeDB import AnimeDB
 from .UserDB import UserDB
 from .Tags import Tags
 from .User import User
 from .GeneralData import GeneralData as GeneralData
 from .UserAffinityCalculator import UserAffinityCalculator
 from .filenames import *
-from .MAL_utils import *
-from .Graphs import Graphs
+from .Graphs2 import Graphs2
 from .GlobalValues import cpu_share
 from concurrent.futures import ProcessPoolExecutor
-from memory_profiler import profile
-import shutil
-from collections import namedtuple
 import time
 from dataclasses import dataclass, field
-from functools import singledispatch
+from .general_utils import load_pickled_file, save_pickled_file, time_at_current_point, shuffle_df, handle_nans
 
-
-# @dataclass
-# class GeneralData:
-#     relevant_shows: list = field(default=None)
-#
-#     mean_score_per_show: pl.DataFrame = field(default=None) # change those three to dicts?
-#     scored_members_per_show: pl.DataFrame = field(default=None)
-#     scored_shows_per_user: pl.Series = field(default=None)
-#
-#     user_amount: int = field(default=None)
-#
-#     aff_means: dict = field(default=None)
-#     aff_stds: dict = field(default=None)
-#
-#     OG_aff_means: dict = field(default=None)
-#     OG_aff_stds: dict = field(default=None)
-#
-#     db_type: int = field(default=None)
-#
-#     # _users_tag_affinity_dict : dict = field(default=None)
-#     # users_tag_pos_affinity_dict : dict = field(default=None)
-#
-#     def generate_data(self):
-#         tags = Tags()
-#         anime_db = AnimeDB()
-#         user_db = UserDB()
-#         self.relevant_shows = list(tags.entry_tags_dict.keys())
-#         partial_main_df = user_db.df.select(user_db.stats + self.relevant_shows)
-#         partial_anime_df = anime_db.df.select(["Rows"] + self.relevant_shows)
-#
-#         self.mean_score_per_show = partial_anime_df.filter(pl.col('Rows') == "Mean Score")
-#         self.scored_members_per_show = partial_anime_df.filter(pl.col('Rows') == "Scores").to_dict(
-#             as_series=False)
-#         self.scored_shows_per_user = user_db.df['Scored Shows'].to_list()
-#         self.user_amount = partial_main_df.shape[0]
-#         if os.path.isfile(aff_db_filename):
-#             self._get_means_of_affs()
-#             self._get_db_type()
-#         self._get_means_of_OG_affs(partial_main_df)
-#
-#         return self
-#         # self._get_means_of_OG_aff_columns()
-#
-#
-#     # def _get_db_type(self):
-#     #     pass
-#
-#     # def _get_means_of_affs(self):
-#     #     aff_db = AffinityDB()
-#     #     mean_dict = {}
-#     #     std_dict = {}
-#     #
-#     #     if aff_db.df is not None: # Think about how to include those means later? Also why would aff_db.df be equal none
-#     #         cols_for_norm = [x for x in list(aff_db.df.columns) if x not in
-#     #                          ["Pos Affinity Ratio", "Neg Affinity Ratio", "Show Popularity", "User Scored Shows",
-#     #                           "User Score"]]
-#     #         for col in cols_for_norm:
-#     #             # mean_dict[col] = aff_db.df.filter(aff_db.df[col] != 0)[col].mean()
-#     #             # std_dict[col] = aff_db.df.filter(aff_db.df[col] != 0)[col].std()
-#     #             mean_dict[col] = aff_db.df[col].mean()
-#     #             std_dict[col] = aff_db.df[col].std()
-#     #         self.aff_means = mean_dict
-#     #         self.aff_stds = std_dict
-#
-#     def _get_means_of_OG_affs(self, partial_main_df):
-#         tags = Tags()
-#         users_tag_affinity_dict = {}
-#         for user_index in range(0, self.user_amount, 10):
-#             if user_index%100 == 0:
-#                 print(f"Calculating affinities of each user to each tag,"
-#                        f" currently on user {user_index} out of {self.user_amount}")
-#             user = User(name=partial_main_df['Username'][user_index],
-#                         scores=partial_main_df.select(self.relevant_shows).row(user_index, named=True),
-#                         scored_amount=partial_main_df["Scored Shows"][user_index])
-#             user_aff_calculator = UserAffinityCalculator(user, self, tags)
-#             user = user_aff_calculator.get_user_affs()
-#             if not user.tag_affinity_dict:
-#                 continue
-#             users_tag_affinity_dict[user.name] = user.tag_affinity_dict
-#
-#         OG_tag_aff_db = pd.DataFrame(users_tag_affinity_dict)
-#         OG_tag_aff_db.to_parquet(data_path / "OG_tag_aff_db.parquet")
-#
-#         self.OG_aff_means = {}
-#         for i,col in enumerate(OG_tag_aff_db.index):
-#             self.OG_aff_means[col] = OG_tag_aff_db.iloc[i].mean()
-
-
-# @dataclass
-# class User:
-#     tag_affinity_dict: dict = field(default=None)
-#     tag_pos_affinity_dict: dict = field(default=None)
-#     adj_tag_affinity_dict : dict = field(default=None)
-#     adj_pos_tag_affinity_dict : dict = field(default=None)
-#
-#     mean_of_single_affs: int = field(default=None)
-#     mean_of_double_affs: int = field(default=None)
-#
-#     name: str = field(default=None)
-#     scored_amount: int = field(default=None)
-#     scores: dict = field(default=None)
-#
-#     mean_of_watched: float = field(default=None)
-#     std_of_watched: float = field(default=None)
-#     MAL_mean_of_watched: float = field(default=None)
-#
-#     score_per_tag: dict = field(default=None)
-#     MAL_score_per_tag: dict = field(default=None)
-#     positive_aff_per_tag: dict = field(default=None)
-#     freq_coeff_per_tag: dict = field(default=None)
-#     tag_entry_list : dict = field(default=None)
-#     tag_counts: dict = field(default=None)
-#
-#     sum_of_freq_coeffs_st: int = field(default=0)
-#     sum_of_freq_coeffs_dt: int = field(default=0)
-#
-#     freq_multi_st : int = field(default=0)
-#     freq_multi_dt : int = field(default=0)
-#
-#     entry_list: list = field(default=None)
-#     show_count: int = field(default=None)
-#
-#     score_diffs: list = field(default=None)
-#     exp_coeffs: list = field(default=None)
-#
-#     def center_tag_aff_dict_means(self, means):
-#         for tag in self.tag_affinity_dict:
-#             # Normalizing the affinities to each tag, with the means being calculated in generate_data().
-#             try:
-#                 self.tag_affinity_dict[tag] =\
-#                     self.tag_affinity_dict[tag] - means[tag]
-#             except TypeError:
-#                 continue
-
-
-# def initialize_user_stats(user, data):
-#     """Initializes the necessary stats for user's affinities to be calculated."""
-#     watched_user_score_list = [score for title, score in user.scores.items() if score]
-#     # ^ Simply a list of the user's scores for every show they watched
-#
-#     watched_titles = [title for title, score in user.scores.items() if score]
-#     # watched_MAL_score_dict = self.data.mean_score_per_show.select(watched_titles).to_dict(as_series=False)
-#     watched_MAL_score_dict = data.mean_score_per_show.select(watched_titles).to_dict(as_series=False)
-#     watched_MAL_score_list = [score[0] for title, score in
-#                               watched_MAL_score_dict.items() if title != "Rows"]
-#
-#     user.MAL_mean_of_watched = np.mean(watched_MAL_score_list)
-#     user.mean_of_watched = np.mean(watched_user_score_list)
-#     user.std_of_watched = np.std(watched_user_score_list)
-#     user.entry_list = watched_titles
-#     return user
-
-
-#  ------------------------------------------------------------------------------------------------
 class AffDBEntryCreator:
 
-    def __init__(self, user : User, data : GeneralData, tags: Tags):
+    # Refactor this into v2 later
+
+    def __init__(self, user: User, data: GeneralData, tags: Tags):
         self.user = user
         self.data = data
         self.features = AffinityDB.Features()
         self.tags = tags
         self.user_affinity_calculator = UserAffinityCalculator(self.user, self.data, self.tags)
         self.aff_db_entry_dict = None
-        self.graphs = Graphs()
+        self.graphs = Graphs2()
 
     @classmethod
     def initialize_aff_db_dict(cls, db_type=1, for_predict=False):
@@ -199,7 +46,7 @@ class AffDBEntryCreator:
             for category in list(tags.tags_per_category.keys()) + ["Genres"]:
                 aff_db_entry_dict = aff_db_entry_dict | {f"{category} {' '.join(stat.split()[1:])}": []
                                                          for stat in features.category_features
-                                                         if "Double" not in stat}
+                                                         if "Double" not in stat and "Doubles" not in category}
             aff_db_entry_dict = aff_db_entry_dict | {"Studio Affinity": [], "Studio Pos Affinity": []}
 
         elif db_type == 2:
@@ -217,7 +64,7 @@ class AffDBEntryCreator:
         try:
             tag_index = entry_tags_list.index(tag_name)
         except ValueError:
-            return 0,0
+            return 0, 0
 
         try:
             adjusted_p = entry_tag_percentages[tag_index]
@@ -225,7 +72,7 @@ class AffDBEntryCreator:
             adjusted_p = 1
 
         if adjusted_p == 0:
-            return 0,0
+            return 0, 0
 
         if not use_adj:
             dict_to_use = self.user.tag_affinity_dict
@@ -251,7 +98,6 @@ class AffDBEntryCreator:
         :param entry_tags_dict:
         :param entry_genres_list: remove
         :param overall_temp_dict: Dictionary that holds the current max/min value for each max/min/avg category.
-        :return: None (simply updates
         """
 
         def update_stats(stats_dict, tag_weight, aff_tag_weight, pos_aff_tag_weight, tag_type):
@@ -276,41 +122,31 @@ class AffDBEntryCreator:
                     > stats_dict[f"{tag_type} Max Pos Affinity"]:
                 stats_dict[f"{tag_type} Max Pos Affinity"] = pos_aff_tag_weight
 
-         # Give this tag_type if it's only related to overall_dict
-
-        # try:
-        #     # This part is just to find out whether it's single or double ahead of time
-        #     tag_name = category_tag_list[0]
-        # except IndexError:
-        #     tag_name = None
-        tag_type = self.tags.get_category_tag_type(category)
-        # tag_type = "Single" if tag_name and "<" not in tag_name else "Double"  # All tags in a category = same type
-        cat_suffix = category.split("-")[-1] # will become unnecessary if trimming down double cats to one, remove?
-        # There won't be any doubles with <Cute Girls Doing Cute Things>x<?> if the show isn't a CGDCT
+        tag_type = self.tags.get_category_tag_type(category)  # Single or Double
         entry_tags_dict = self.tags.entry_tags_dict2[entry]
         temp_dict = self.initialize_temp_dict()
 
-        # if category == 'Genres' or category == 'Studio':
-        #     for tag_name in category_tag_list:
-        #         entry_tags_dict[tag_name] = {}
-        #         entry_tags_dict[tag_name]['percentage'] = 1
-
+        #  We loop over each tag in the category, updating the temp_dict which represents the stats
+        #  for said category after getting each tag's weight. (For example if temp_dict['Single Max Affinity']
+        #  is 0.5, and the next tag 'Space' has an aff_tag_weight of 1.0, after update_stats
+        #  temp_dict['Single Max Affinity'] will be 1.0.
         for tag_name in category_tag_list:
             try:
                 tag_p = entry_tags_dict[tag_name]['percentage']
-                # self.user.adjust_aff_dicts(entry_tags_dict, entry) # 'Crime' : 0.94 etc
                 aff_tag_weight = self.user.adj_tag_affinity_dict[tag_name] * tag_p
                 pos_aff_tag_weight = self.user.adj_pos_tag_affinity_dict[tag_name] * tag_p
-                # tag_count += entry_tags_dict[tag_name]['percentage']
             except KeyError:
+                # Tag not part of this entry
                 continue
             if not aff_tag_weight:
                 continue  # No point updating if the user has 0 affinity to that tag
             update_stats(temp_dict, entry_tags_dict[tag_name]['percentage'],
                          aff_tag_weight, pos_aff_tag_weight, tag_type)
 
+        # At this point ratio = sum, it hasn't been divided by total yet
         tag_count = temp_dict[f"{tag_type} Pos Affinity Ratio"] + temp_dict[f"{tag_type} Neg Affinity Ratio"]
 
+        # Averages = sums as well until this point, need to divide by tag count to get true averages
         try:
             temp_dict[f"{tag_type} Avg Affinity"] /= tag_count
             temp_dict[f"{tag_type} Avg Pos Affinity"] /= tag_count
@@ -320,6 +156,12 @@ class AffDBEntryCreator:
 
         if category != 'Studio':
             for stat in self.features.category_features:  # "single/double max/min/avg/maxpos affinity"
+                if category == 'Doubles':
+                    # 'Doubles' is simply a category that allows us to loop over the doubles.
+                    # It should not have separate "Doubles Max Affinity" categories in the main
+                    # dict/database because we already cover that when updating f"{tag_type} Max Affinity"
+                    # when looping over doubletags.
+                    break
                 if tag_type not in stat:
                     continue
                 if temp_dict[stat] is None:
@@ -363,8 +205,19 @@ class AffDBEntryCreator:
                      for stat, stat_value in temp_dict.items()}  # Quick way to create stats for each tag type
         return temp_dict
 
-    def create_db_entries_from_user_list(self, shuffle_list=False, for_predict=False, shows_to_take="watched", db_type=1,
-                                         sample_size=0):
+    def get_user_db(self, shows_to_take):
+        # move to affinitydb
+        # aff_db_entry_creator = AffDBEntryCreator(user, self.data, self.tags)
+        self.create_db_entries_from_user_list(
+            shuffle_list=False, shows_to_take=shows_to_take,
+            db_type=1, for_predict=True)
+
+        user_db_entries = self.aff_db_entry_dict
+        user_shows_df_with_name = pd.DataFrame(user_db_entries)
+        return user_shows_df_with_name
+
+    def create_db_entries_from_user_list(self, shuffle_list=False, for_predict=False,
+                                         shows_to_take="watched", db_type=1, sample_size=0):
         def get_user_entry_list(shows_to_take):
             if shows_to_take == "watched":
                 # This will always be used for calculating affinities to create the affinity database.
@@ -374,23 +227,23 @@ class AffDBEntryCreator:
                 temp_list = []
                 self.user.entry_list = [key for key, value in self.user.scores.items() if value]
                 for entry in self.user.entry_list:
-                    root, related_shows = self.graphs.find_related_entries(entry)
+                    root, related_shows = self.graphs.all_graphs_no_low_scores.find_related_entries(entry)
                     temp_list += related_shows
                 self.user.entry_list = list(set(self.user.entry_list + temp_list))
             elif shows_to_take == "unwatched":
                 # For predicting scores of shows the user hasn't watched yet.
                 del self.aff_db_entry_dict['User Score']
-                self.user.entry_list = [entry for entry in self.tags.entry_tags_dict.keys()
+                self.user.entry_list = [entry for entry in self.tags.entry_tags_dict_nls.keys()
                                         if entry in self.data.relevant_shows and not self.user.scores[entry]]
             elif shows_to_take == "both":
                 # Predicting on both unwatched and watched shows (to test performance)
                 del self.aff_db_entry_dict['User Score']
-                self.user.entry_list = [entry for entry in self.tags.show_tags_dict.keys()
+                self.user.entry_list = [entry for entry in self.tags.show_tags_dict_nls.keys()
                                         if entry in self.data.relevant_shows]
             elif shows_to_take == "all":
                 # For predicting scores of every single entry (rather than just every show).
                 del self.aff_db_entry_dict['User Score']
-                self.user.entry_list = [entry for entry in self.tags.entry_tags_dict.keys()
+                self.user.entry_list = [entry for entry in self.tags.entry_tags_dict_nls.keys()
                                         if entry in self.data.relevant_shows]
             else:
                 raise ValueError("shows_to_predict expects a value of either 'watched', 'unwatched', 'both' or 'all'.")
@@ -411,16 +264,16 @@ class AffDBEntryCreator:
             if entry in processed_entries:
                 continue
             try:
-                main_entry = self.tags.entry_tags_dict[entry]['Main']
+                main_entry = self.tags.entry_tags_dict_nls[entry]['Main']
             except KeyError:
                 continue
-            main_show_data = self.tags.show_tags_dict[self.tags.entry_tags_dict[entry]['Main']]
+            main_show_data = self.tags.show_tags_dict_nls[self.tags.entry_tags_dict_nls[entry]['Main']]
             self.user.adj_tag_affinity_dict = self.user.tag_affinity_dict.copy()
             self.user.adj_pos_tag_affinity_dict = self.user.tag_pos_affinity_dict.copy()
 
             self.user_affinity_calculator.recalc_affinities_2(main_entry)
 
-            for entry, length_coeff in self.tags.show_tags_dict[main_entry]['Related'].items():
+            for entry, length_coeff in self.tags.show_tags_dict_nls[main_entry]['Related'].items():
 
                 # if entry in processed_entries: # try dict instead?
                 #     continue
@@ -428,7 +281,7 @@ class AffDBEntryCreator:
                 if shows_to_take == 'watched' and not self.user.scores[entry]:
                     continue
 
-                if shows_to_take == "pain": #basically never, fix this later
+                if shows_to_take == "":  # can never happen, remove this later after checking
                     # In this case, the entry's tags will be the entire show's tags (so the combination
                     # of all tags for all of the entries of that show, as done in Tags.get_show_tags())
                     # This might not accurately represent a specific entry if, for example, a season 2
@@ -437,14 +290,14 @@ class AffDBEntryCreator:
                     # which means less people deciding on the tags on Anilist + in most cases
                     # seasons of the same show should be similar in terms of what kind of people will enjoy them
                     # so might as well make them exactly the same to avoid inconsistencies.
-                    main_show_data = self.tags.show_tags_dict[self.tags.entry_tags_dict[entry]['Main']]
+                    main_show_data = self.tags.show_tags_dict_nls[self.tags.entry_tags_dict_nls[entry]['Main']]
                     entry_tags_list = main_show_data['Tags'] + main_show_data['DoubleTags']
-                    entry_genres_list = self.tags.show_tags_dict[self.tags.entry_tags_dict[entry]['Main']]['Genres']
+                    entry_genres_list = self.tags.show_tags_dict_nls[self.tags.entry_tags_dict_nls[entry]['Main']]['Genres']
                 else:
                     # In this case, we'll take the individual tags of each entry (for testing).
-                    entry_tags_list = self.tags.entry_tags_dict[entry]['Tags'] + self.tags.entry_tags_dict[entry]['DoubleTags']
-                    entry_genres_list = self.tags.entry_tags_dict[entry]['Genres']
-                entry_studio = self.tags.entry_tags_dict[entry]['Studio']
+                    entry_tags_list = self.tags.entry_tags_dict_nls[entry]['Tags'] + self.tags.entry_tags_dict_nls[entry]['DoubleTags']
+                    entry_genres_list = self.tags.entry_tags_dict_nls[entry]['Genres']
+                entry_studio = self.tags.entry_tags_dict_nls[entry]['Studio']
                 entry_tag_names = [tag['name'] for tag in entry_tags_list]
                 entry_tag_percentages = [tag['percentage'] for tag in entry_tags_list]
 
@@ -455,7 +308,7 @@ class AffDBEntryCreator:
                     try:
                         self.aff_db_entry_dict['Score Difference'].append(self.data.mean_score_per_show[entry] - \
                                                                        self.data.mean_score_per_show[main_entry])
-                    except ColumnNotFoundError:
+                    except (ColumnNotFoundError, KeyError) as e:
                         continue  # A unique case of a sequel that meets the conditions of partial_anime_df +
                         # a main show that doesn't (for example sequel rated 6.8 but main show rated 6.1).
                         # We don't want to count this.
@@ -516,9 +369,8 @@ class AffDBEntryCreator:
                         self.aff_db_entry_dict[f"{tag_name} Affinity"].append(aff_tag_weight)
                         self.aff_db_entry_dict[f"{tag_name} Pos Affinity"].append(pos_aff_tag_weight)
 
-                # if self.user.scores[entry] and shows_to_take == "watched":
                 if shows_to_take.startswith("watched"):
-                    self.aff_db_entry_dict['User Score'].append(self.user.scores[entry])
+                     self.aff_db_entry_dict['User Score'].append(self.user.scores[entry])
 
                 show_score = self.data.mean_score_per_show[entry]
                 self.aff_db_entry_dict['Show Score'].append(show_score)
@@ -528,13 +380,18 @@ class AffDBEntryCreator:
                 entry_members = self.data.scored_members_per_show[entry][0]
                 self.aff_db_entry_dict['Show Popularity'].append(entry_members)
                 self.aff_db_entry_dict['User Scored Shows'].append(self.user.scored_amount)
-                self.aff_db_entry_dict['Length Coeff'].append(self.tags.show_tags_dict[main_entry]['Related'][entry])
+                self.aff_db_entry_dict['Length Coeff'].append(
+                    self.tags.show_tags_dict_nls[main_entry]['Related'][entry])
+
+        for key in list(self.aff_db_entry_dict.keys()):
+            if key.startswith('Doubles'):
+                del self.aff_db_entry_dict[key]
 
     def get_recommended_show_aff(self, entry):
 
         total_rec_rating = sum(
-            [rating for title, rating in self.tags.entry_tags_dict[entry]['Recommended'].items()])
-        recommended_shows = self.tags.entry_tags_dict[entry]['Recommended']
+            [rating for title, rating in self.tags.entry_tags_dict_nls[entry]['Recommended'].items()])
+        recommended_shows = self.tags.entry_tags_dict_nls[entry]['Recommended']
         rec_affinity = 0
 
         for rec_anime, rec_rating in recommended_shows.items():
@@ -554,300 +411,6 @@ class AffDBEntryCreator:
             self.aff_db_entry_dict['Recommended Shows Affinity'].append(0)
 
 
-#  ----------------------------------------------------------------------------------------------------
-# class UserAffinityCalculator:
-#
-#     def __init__(self, user: User, data: GeneralData, tags: Tags):
-#         self.user = user
-#         self.data = data
-#         self.tags = tags
-#
-#     def initialize_user_dicts(self):
-#         self.user.tag_affinity_dict = {tag_name: 0 for tag_name in self.tags.all_anilist_tags}
-#         self.user.tag_pos_affinity_dict = {tag_name: 0 for tag_name in self.tags.all_anilist_tags}
-#         self.user.score_per_tag = {tag_name: 0 for tag_name in self.tags.all_anilist_tags}
-#         self.user.MAL_score_per_tag = {tag_name: 0 for tag_name in self.tags.all_anilist_tags}
-#         self.user.tag_entry_list = {tag_name: [] for tag_name in self.tags.all_anilist_tags}
-#         self.user.freq_coeff_per_tag = {tag_name: 0 for tag_name in self.tags.all_anilist_tags}
-#         self.user.tag_counts = {tag_name: 0 for tag_name in self.tags.all_anilist_tags}
-#
-#     def _calculate_affinities(self, tag):
-#         try:
-#             tag_overall_ratio = self.user.tag_counts[tag] / self.user.show_count
-#             freq_coeff = min(1, max(self.user.tag_counts[tag] / 10, tag_overall_ratio * 20))
-#             if "<" in tag:
-#                 self.user.sum_of_freq_coeffs_dt += freq_coeff
-#             else:
-#                 self.user.sum_of_freq_coeffs_st += freq_coeff
-#             self.user.freq_coeff_per_tag[tag] = freq_coeff
-#             # User has to watch either at least 10 shows with the tag or have the tag
-#             # in at least 5% of their watched shows for it to count fully.
-#             user_tag_diff = self.user.score_per_tag[tag] / self.user.tag_counts[tag] - self.user.mean_of_watched
-#             MAL_tag_diff = self.user.MAL_score_per_tag[tag] / self.user.tag_counts[tag] - self.user.MAL_mean_of_watched
-#             self.user.tag_affinity_dict[tag] = (2 * user_tag_diff - MAL_tag_diff) * freq_coeff
-#             self.user.tag_pos_affinity_dict[tag] = (self.user.tag_pos_affinity_dict[tag] / self.user.tag_counts[tag]) \
-#                                                    * freq_coeff
-#
-#         # Add freq_coeff for each tag somewhere
-#         except ZeroDivisionError:
-#             self.user.tag_affinity_dict[tag] = 0
-#             self.user.tag_pos_affinity_dict[tag] = 0 # ?
-#
-#     def _center_mean_of_affinities(self):
-#         def center_tags(tag_type):
-#             if tag_type == 'Single':
-#                 tags = self.tags.all_single_tags + self.tags.all_genres + self.tags.all_studios
-#                 freq_multi = len(tags) / self.user.sum_of_freq_coeffs_st
-#                 mean_of_affs = np.mean([value for key, value in self.user.tag_affinity_dict.items()
-#                                         if "<" not in key])
-#                 self.user.mean_of_single_affs = mean_of_affs
-#                 self.user.freq_multi_st = freq_multi
-#             else:
-#                 tags = self.tags.all_doubletags
-#                 freq_multi = len(tags) / self.user.sum_of_freq_coeffs_dt
-#                 mean_of_affs = np.mean([value for key, value in self.user.tag_affinity_dict.items()
-#                                         if "<" in key])
-#                 self.user.mean_of_double_affs = mean_of_affs
-#                 self.user.freq_multi_dt = freq_multi
-#
-#             for tag in tags:
-#                 self.user.tag_affinity_dict[tag] = self.user.tag_affinity_dict[tag] - mean_of_affs\
-#                                                    * freq_multi * self.user.freq_coeff_per_tag[tag]
-#
-#         if self.data.OG_aff_means:
-#             self.user.center_tag_aff_dict_means(self.data.OG_aff_means)
-#         center_tags(tag_type='Single')
-#         center_tags(tag_type='Double')
-#
-#     def _process_entry_tags(self, related_entry, length_coeff, user_score, MAL_score):
-#
-#         MAL_score_coeff = -0.6 * MAL_score + 5.9
-#         related_entry_data = self.tags.entry_tags_dict[related_entry]
-#         for tag in related_entry_data['Tags'] + related_entry_data['DoubleTags']:
-#             if tag['name'] not in self.tags.all_anilist_tags:
-#                 continue
-#             adjusted_p = tag['percentage'] # fix later
-#             # # On Anilist, every tag a show has is listed with a percentage. This percentage
-#             # # can be pushed down or up a bit by any registered user, so as a variable it
-#             # # inevitably introduces human error - a tag with 60% means that not all users agree
-#             # # that said tag is strongly relevant to the show, and thus we want to reduce its weight
-#             # # by more than just 40% compared to a 100% tag.
-#
-#             self.user.score_per_tag[tag['name']] += user_score * adjusted_p * length_coeff
-#             self.user.MAL_score_per_tag[tag['name']] += MAL_score * adjusted_p * length_coeff
-#             self.user.tag_counts[tag['name']] += adjusted_p * length_coeff
-#             self.user.tag_entry_list[tag['name']].append(related_entry)
-#
-#             if user_score >= self.user.mean_of_watched:
-#                 self.user.tag_pos_affinity_dict[tag['name']] += MAL_score_coeff * \
-#                                                                 self.user.exp_coeffs[10 - user_score] \
-#                                                                 * adjusted_p * length_coeff
-#
-#         # for genre in self.tags.entry_tags_dict[related_entry]['Genres']:
-#         for genre in related_entry_data['Genres']:
-#             self.user.score_per_tag[genre] += user_score * length_coeff
-#             self.user.MAL_score_per_tag[genre] += MAL_score * length_coeff
-#             self.user.tag_counts[genre] += length_coeff
-#             self.user.tag_entry_list[genre].append(related_entry)
-#             # Genres and studios do not have percentages, so we add 1 as if p=100
-#
-#             if user_score >= self.user.mean_of_watched:
-#                 self.user.tag_pos_affinity_dict[genre] += MAL_score_coeff * \
-#                                                           self.user.exp_coeffs[10 - user_score] \
-#                                                           * length_coeff
-#
-#         show_studio = self.tags.entry_tags_dict[related_entry]['Studio']
-#         if show_studio in self.tags.all_anilist_tags:
-#             self.user.score_per_tag[show_studio] += user_score * length_coeff
-#             self.user.MAL_score_per_tag[show_studio] += MAL_score * length_coeff
-#             self.user.tag_counts[show_studio] += length_coeff
-#             self.user.tag_entry_list[show_studio].append(related_entry)
-#
-#             if user_score >= self.user.mean_of_watched:
-#                 self.user.tag_pos_affinity_dict[show_studio] += MAL_score_coeff * \
-#                                                                 self.user.exp_coeffs[10 - user_score] \
-#                                                                 * length_coeff
-#
-#     def get_user_affs(self):
-#
-#         processed_entries = []
-#         self.user.entry_list = []
-#         self.user.show_count = 0
-#
-#         self.initialize_user_dicts()
-#         # self.get_user_list_stats()
-#         self.user = initialize_user_stats(self.user, self.data)
-#
-#         try:
-#             x = int(np.ceil(self.user.mean_of_watched))
-#         except ValueError:
-#             # This means the user has no watched shows, or there is another issue with the data.
-#             print(f"Mean is {self.user.mean_of_watched}")
-#             return self.user
-#
-#         self.user.score_diffs = [score - self.user.mean_of_watched for score in range(10, x - 1, -1)]
-#         self.user.exp_coeffs = [1 / 2 ** (10 - exp) * self.user.score_diffs[10 - exp]
-#                                 for exp in range(10, x - 1, -1)]
-#
-#         for entry in self.user.entry_list:
-#             user_score = self.user.scores[entry]
-#             if not user_score or entry in processed_entries:
-#                 continue
-#
-#             main_show = self.tags.entry_tags_dict[entry]['Main']
-#             main_show_data = self.tags.show_tags_dict[main_show]
-#             user_watched_entries_length_coeffs = [x[1] for x in
-#                                                   main_show_data['Related'].items()
-#                                                   if self.user.scores[x[0]]]
-#
-#             sum_of_length_coeffs = sum(user_watched_entries_length_coeffs)
-#
-#             for related_entry, length_coeff in main_show_data['Related'].items():
-#                 processed_entries.append(related_entry)
-#                 user_score = self.user.scores[related_entry]
-#                 if not user_score:
-#                     continue
-#
-#                 length_coeff = length_coeff / sum_of_length_coeffs
-#
-#                 MAL_score = self.data.mean_score_per_show[related_entry][0]
-#                 if MAL_score < 6.5:
-#                     print("Warning - MAL score lower than 6.5")
-#                     continue
-#
-#                 self.user.show_count += length_coeff
-#
-#                 # Calculates sums (user_score_per_show, MAL_score_per_show, etc)
-#                 self._process_entry_tags(related_entry, length_coeff, user_score, MAL_score)
-#
-#         for tag in self.tags.all_anilist_tags:
-#             self._calculate_affinities(tag)
-#
-#         self._center_mean_of_affinities()
-#
-#         return self.user
-#
-#     def recalc_affinities_2(self, entry):
-#
-#         main_show = entry
-#         sum_of_length_coeffs = sum([length_coeff for related_entry, length_coeff
-#                                     in self.tags.show_tags_dict[main_show]['Related'].items()
-#                                     if self.user.scores[related_entry]])
-#
-#         if not sum_of_length_coeffs:
-#             return
-#
-#         new_user_score_per_tag = self.user.score_per_tag.copy()
-#         new_user_tag_count = self.user.tag_counts.copy()
-#         new_user_show_count = self.user.show_count
-#         new_MAL_score_per_tag = self.user.MAL_score_per_tag.copy()
-#         new_freq_coeffs = self.user.freq_coeff_per_tag.copy()
-#         new_mean_of_watched = self.user.mean_of_watched
-#         new_MAL_mean = self.user.MAL_mean_of_watched
-#         pos_aff_per_entry = {}
-#         show_tag_names = set()
-#
-#         for entry, length_coeff in self.tags.show_tags_dict[main_show]['Related'].items():
-#             length_coeff /= sum_of_length_coeffs
-#             entry_user_score = self.user.scores[entry]
-#             if not entry_user_score:
-#                 continue
-#             entry_MAL_score = self.data.mean_score_per_show[entry].item()
-#
-#             new_mean_of_watched = (new_mean_of_watched * new_user_show_count) - entry_user_score * length_coeff
-#             new_MAL_mean = (new_MAL_mean * new_user_show_count) - entry_MAL_score * length_coeff
-#
-#             new_user_show_count -= length_coeff
-#
-#             new_mean_of_watched /= new_user_show_count
-#             new_MAL_mean /= new_user_show_count
-#
-#             entry_MAL_coeff = self.MAL_score_coeff(entry_MAL_score)
-#             # Turn the data thingy into a dict so no .item()
-#             try:
-#                 entry_exp_coeff = self.user.exp_coeffs[10 - entry_user_score]
-#             except IndexError:
-#                 entry_exp_coeff = 0
-#
-#             pos_aff_per_entry[entry] = entry_MAL_coeff * entry_exp_coeff * length_coeff
-#             entry_tags_dict = self.tags.entry_tags_dict2[entry]
-#
-#             for tag, tag_p in entry_tags_dict.items():
-#
-#                 try:
-#                     tag_p = tag_p['percentage']
-#                 except KeyError:
-#                     tag_p = 1
-#
-#                 try:
-#                     # tag_overall_ratio =  (self.user.tag_counts[tag]-length_coeff)/(self.user.show_count-length_coeff)\
-#                     new_user_tag_count[tag] -= length_coeff * tag_p
-#                     try:
-#                         tag_overall_ratio = new_user_tag_count[tag]/new_user_show_count
-#                     except ZeroDivisionError:
-#                         return
-#                         # This is an EXTREMELY rare case where a person has only ONE relevant scored show.
-#                         # Not going to bother handling it properly, since the requirement to be in the database
-#                         # is 50 scored shows - for exactly 49 of them to be irrelevant (too obscure) is nigh impossible.
-#                         # The one person out of the millions tested who triggered this was someone who watches almost
-#                         # exclusively hentai, and their one relevant scored show was Keijo!!!!!!!!. Why man, just why.
-#
-#                     # tag_freq_coeff = min(1, max(new_user_tag_count[tag] / 10, tag_overall_ratio * 20))
-#                     new_freq_coeffs[tag] = min(1, max(new_user_tag_count[tag] / 10, tag_overall_ratio * 20))
-#                 except KeyError:
-#                     # Tag is a studio that appears in entry_tags_dict
-#                     # but isn't in tags.all_anilist_tags (too niche)
-#                     continue
-#
-#                 show_tag_names.add(tag)
-#                 new_user_score_per_tag[tag] -= entry_user_score * tag_p * length_coeff
-#                 new_MAL_score_per_tag[tag] -= entry_MAL_score * tag_p * length_coeff
-#                 # user_score_per_tag = self.user.score_per_tag[tag] - entry_user_score * tag_p
-#                 # user_tag_count = self.user.tag_counts[tag] - tag_p
-#
-#         for tag in show_tag_names:
-#             pos_aff_per_entry_for_tag = pos_aff_per_entry.copy()
-#         # for entry, length_coeff in self.tags.show_tags_dict[main_show]['Related'].items():
-#         #     entry_tags_dict = self.tags.entry_tags_dict2[entry]
-#         #     for tag, tag_p in entry_tags_dict.items():
-#             try:
-#                 user_tag_diff = new_user_score_per_tag[tag] / new_user_tag_count[tag] - new_mean_of_watched
-#             except ZeroDivisionError:
-#                 self.user.adj_tag_affinity_dict[tag] = 0
-#                 self.user.adj_pos_tag_affinity_dict[tag] = 0
-#                 continue  # This entry was the only one with the tag, so affinities are 0 without it
-#
-#             # MAL_score_per_tag = self.user.MAL_score_per_tag[tag] - entry_MAL_score * tag_p
-#             MAL_tag_diff = new_MAL_score_per_tag[tag] / new_user_tag_count[tag] - new_MAL_mean
-#
-#             self.user.adj_tag_affinity_dict[tag] = (2 * user_tag_diff - MAL_tag_diff) * new_freq_coeffs[tag]
-#             self.user.adj_tag_affinity_dict[tag] -= self.data.OG_aff_means[tag]
-#
-#             mean_of_affs = self.user.mean_of_double_affs if "<" in tag else self.user.mean_of_single_affs
-#             freq_multi = self.user.freq_multi_dt if "<" in tag else self.user.freq_multi_st
-#             self.user.adj_tag_affinity_dict[tag] -= mean_of_affs * freq_multi * new_freq_coeffs[tag]
-#
-#             # entry_pos_aff /= self.user.tag_counts[tag] # do minus here?
-#             # entry_pos_aff *= self.user.freq_coeff_per_tag[tag]
-#             for entry in pos_aff_per_entry.keys():
-#                 try:
-#                     pos_aff_per_entry_for_tag[entry] *= self.tags.entry_tags_dict2[entry][tag]['percentage']
-#                 except KeyError:
-#                     pos_aff_per_entry_for_tag[entry] = 0
-#             show_pos_aff = sum(pos_aff_per_entry_for_tag.values())
-#
-#             OG_pos_aff = self.user.tag_pos_affinity_dict[tag] * self.user.tag_counts[tag]
-#             OG_pos_aff /= self.user.freq_coeff_per_tag[tag]
-#             new_pos_aff = OG_pos_aff - show_pos_aff
-#             new_pos_aff *= new_freq_coeffs[tag]
-#             new_pos_aff /= new_user_tag_count[tag]
-#             self.user.adj_pos_tag_affinity_dict[tag] = new_pos_aff
-#
-#     @staticmethod
-#     def MAL_score_coeff(score):
-#         return -0.6 * score + 5.9
-
-
 #  ------------------------------------------------------------------------------------------------
 class AffinityDB:
     _instance = None
@@ -856,8 +419,6 @@ class AffinityDB:
     size_limit = 20_000_000
 
     def __new__(cls, *args, **kwargs):
-        """The class is a Singleton - we only need one instance of it since its purpose is
-        to house and create on demand all the data structures that are used in this project."""
         if cls._instance is None:
             cls._instance = super().__new__(cls, *args, **kwargs)
         return cls._instance
@@ -866,15 +427,11 @@ class AffinityDB:
         # All properties are loaded on demand
         self._df = None
         self._data = None
-        # self.size_limit = 20_000_000
         self.features = self.Features()
-        # self.users_tag_affinity_dict = {}
         self._OG_aff_means = None
         self._major_parts = None
         self._db_type = db_type
-        # self.anime_df = AnimeDB()
-        # self.tags = Tags()
-        self.graphs = Graphs() #remove the selfs from other classes too?...
+        self.graphs = Graphs2()
 
     @dataclass
     class Features:
@@ -962,11 +519,12 @@ class AffinityDB:
             user_db = UserDB()
             user_db.split_df(parts)
             del user_db
-            time.sleep(5)
+            # time.sleep(5)
 
         if not os.path.isfile(data_path / "general_data.pickle"):
             data = GeneralData()
             data.generate_data()
+            save_pickled_file(data_path / "general_data.pickle", data)
             data = self.get_means_of_OG_affs()
 
             save_pickled_file(data_path / "general_data.pickle", data)
@@ -984,28 +542,6 @@ class AffinityDB:
         self.shuffle()
 
     def create_minor_parts(self,args):
-
-        # def get_means_of_OG_affs():
-        #     users_tag_affinity_dict = {}
-        #     for user_index in range(0, self.data.user_amount, 10):
-        #         if user_index % 100 == 0:
-        #             print(f"Calculating affinities of each user to each tag,"
-        #                   f" currently on user {user_index} out of {self.data.user_amount}")
-        #         user = User(name=partial_main_df['Username'][user_index],
-        #                     scores=partial_main_df.select(self.data.relevant_shows).row(user_index, named=True),
-        #                     scored_amount=partial_main_df["Scored Shows"][user_index])
-        #         user_aff_calculator = UserAffinityCalculator(user, self.data, tags)
-        #         user = user_aff_calculator.get_user_affs()
-        #         if not user.tag_affinity_dict:
-        #             continue
-        #         users_tag_affinity_dict[user.name] = user.tag_affinity_dict
-        #
-        #     OG_tag_aff_db = pd.DataFrame(users_tag_affinity_dict)
-        #     OG_tag_aff_db.to_parquet(data_path / "OG_tag_aff_db.parquet")
-        #
-        #     self.OG_aff_means = {}
-        #     for j, col in enumerate(OG_tag_aff_db.index):
-        #         self.OG_aff_means[col] = OG_tag_aff_db.iloc[j].mean()
 
         i, num_parts = args
         print(f"Entered function, process {i}")
@@ -1039,7 +575,7 @@ class AffinityDB:
 
             user = User(name=partial_main_df['Username'][user_index],
                         scores=partial_main_df.select(self.data.relevant_shows).row(user_index, named=True),
-                        scored_amount = partial_main_df["Scored Shows"][user_index])
+                        scored_amount=partial_main_df["Scored Shows"][user_index])
 
             user = UserAffinityCalculator.initialize_user_stats(user, self.data)
 
@@ -1056,8 +592,6 @@ class AffinityDB:
                 subpart_num = (user_index + 1) // save_data_per
                 print(f"Finished processing user {user_amount * i + user_index + 1},"
                       f" saving PP-{int(minor_parts_to_create * i + subpart_num)}")
-                # save_pickled_file(f"user_tag_affinity_dict-PP{subpart_num}.pickle", user_tag_affinity_dict)
-                # Fix the above (either remove this entirely or concatenate them at the end?)
 
                 for key in aff_db_dict.keys():
                     aff_db_dict[key] = np.array(aff_db_dict[key], dtype=np.float32)
@@ -1083,7 +617,7 @@ class AffinityDB:
             for dirpath, dirs, files in os.walk("Partials"):
                 for filename in files:
                     if filename.startswith(f"{aff_db_filename}-PP"):
-                        count+=1
+                        count += 1
             return count
 
         print(f"Unpacking minor chunk 1 of database")
@@ -1093,7 +627,6 @@ class AffinityDB:
         pbar = tqdm(leave=True, desc="Combining", unit=" major chunks", colour="blue")
         for i in range(226, 100000):
             try:
-                # print(f"Unpacking minor chunk {i} of database")
                 temp_df = pl.read_parquet(aff_db_path / f"{aff_db_filename}-PP{i}.parquet")
                 df = df.vstack(temp_df)
             except FileNotFoundError:
@@ -1140,14 +673,12 @@ class AffinityDB:
 
     def normalize(self):
         p = self.major_parts
-        # data = load_pickled_file("general_data.pickle")
         aff_means = None
         aff_stds = None
         pbar = tqdm(total=p, leave=True, desc="Normalizing", unit=" major chunks", colour="green")
         for i in range(p):
-            # print(f"Normalizing chunk {i + 1}")
             df = pd.read_parquet(aff_db_path / f"{aff_db_filename}-P{i + 1}.parquet")
-            df = self.normalize_aff_df(df, is_aff_db=True)
+            df = self.normalize_aff_df(data=self.data, df=df, is_aff_db=True)
             df.to_parquet(aff_db_path / f"{aff_db_filename}-P{i + 1}-N.parquet")
             pbar.update(1)
             if aff_means and aff_stds:
@@ -1162,7 +693,8 @@ class AffinityDB:
         self.data.aff_stds = aff_stds
         save_pickled_file(data_path / "general_data.pickle", self.data)
 
-    def normalize_aff_df(self,df=None, og_filename=None, for_predict=False, is_aff_db=False):
+    @staticmethod
+    def normalize_aff_df(data=None, df=None, og_filename=None, for_predict=False, is_aff_db=False):
         if og_filename:
             if os.path.isfile(f"{og_filename}-N.parquet"):
                 # If a normalized version of a specific database we want to normalize already
@@ -1188,12 +720,12 @@ class AffinityDB:
             # If we're normalizing the database made from a user's list, we must use the main database's
             # mean and standard deviation, as they will be different from the mini-affinity database
             # created from the user's list.
-            if not self.data:
+            if not data:
                 raise ValueError("Data must be sent to acquire mean of main affinity database"
                                  "if for_predict=True")
             for col in cols_for_norm:
                 df.loc[df[col] != 0, col] = \
-                    (df.loc[df[col] != 0, col] - self.data.aff_means[col]) / self.data.aff_stds[col]
+                    (df.loc[df[col] != 0, col] - data.aff_means[col]) / data.aff_stds[col]
         elif is_aff_db:
             mean_dict = {}
             std_dict = {}
@@ -1206,42 +738,26 @@ class AffinityDB:
                     mean_dict[col] = 0
                     std_dict[col] = 0
                 df.loc[df[col] != 0, col] = (df.loc[df[col] != 0, col] - mean_dict[col]) / std_dict[col]
-            self.data.aff_means = mean_dict
-            self.data.aff_stds = std_dict
-            save_pickled_file(data_path / "general_data.pickle", self.data)
+            data.aff_means = mean_dict
+            data.aff_stds = std_dict
+            save_pickled_file(data_path / "general_data.pickle", data)
 
         return df
 
     @staticmethod
     def filter_df_for_model(df):
-        # cols_to_take = [x for x in df.columns if x.startswith("Single") or (x.startswith('Double')
-        #                                                                     and not x.startswith('Doubles-'))
-        #                 or x in ['Mean Score', 'Standard Deviation', 'Recommended Shows Affinity', 'Sequel',
-        #                          'Length Coeff', 'Score Difference', 'User Scored Shows', 'User Score']
-        #                 or "Genres" in x or "Studio" in x]
         cols_to_take = [x for x in df.columns if not x.startswith("Doubles-")
-                             and x != 'Show Score' and x != 'Show Popularity' and x != 'User Score' and 'Tag Count' not in x] #add score difference to this
+                        and x != 'Show Score' and x != 'Show Popularity'
+                        and 'Tag Count' not in x and x != 'Score Difference']  # add score difference to this
         df = df[cols_to_take]
         return df
 
     @staticmethod
-    def remove_show_score():
+    def remove_columns_for_model():
         p = AffinityDB.count_major_parts()
         pbar = tqdm(total=p, leave=True, desc="Removing excess columns from", unit=" major chunks", colour="#888888")
         for i in range(p):
             df = pd.read_parquet(aff_db_path / f"{aff_db_filename}-P{i + 1}-N.parquet")
-            # df.drop('Show Score',inplace=True, axis=1)
-            # for j in range(1,31):
-            #     for stat in ["Max Affinity", "Min Affinity", "Avg Affinity", "Max Pos Affinity"]:
-            #         df.drop(f"Doubles-{j} {stat}", inplace=True, axis=1)
-            # cols_to_take = [x for x in df.columns if not x.startswith("Doubles-")
-            #                 and x != 'Show Score' and x != 'Show Popularity' and 'Tag Count' not in x]
-            # cols_to_take = [x for x in df.columns if x.startswith("Single") or (x.startswith('Double')
-            #                                                                     and not x.startswith('Doubles-'))
-            #                 or x in ['Mean Score', 'Standard Deviation', 'Recommended Shows Affinity', 'Sequel',
-            #                          'Length Coeff', 'Score Difference', 'User Scored Shows', 'User Score']
-            #                 or "Genres" in x or "Studio" in x]
-            # cols_to_take = [x for x in df.columns if not x=='Show Score']
             df = AffinityDB.filter_df_for_model(df)
             df.to_parquet(aff_db_path / f"{aff_db_filename}-P{i + 1}-N-{model_filename_suffix}.parquet")
             pbar.update(1)
@@ -1255,3 +771,18 @@ class AffinityDB:
             p += 1
         return p - 1
 
+    def get_num_features(self):
+        if os.path.exists(aff_db_path / f"{aff_db_filename}-P1-N-{model_filename_suffix}.parquet"):
+            aff_db = pq.ParquetFile(aff_db_path / f"{aff_db_filename}-P1-N-{model_filename_suffix}.parquet")
+        else:
+
+            if not os.path.exists(aff_db_path / f"{aff_db_filename}-P1.parquet"):
+                print("Creating Affinity DB")
+                self.create()
+            if not os.path.exists(aff_db_path / f"{aff_db_filename}-P1-N.parquet"):
+                print("Normalizing Affinity DB")
+                self.normalize()
+            self.remove_columns_for_model()
+            aff_db = pq.ParquetFile(aff_db_path / f"{aff_db_filename}-P1-N-{model_filename_suffix}.parquet")
+        num_features = len(aff_db.schema.names) - 1
+        return num_features

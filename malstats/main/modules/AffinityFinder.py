@@ -1,7 +1,6 @@
 from __future__ import print_function
 from time import perf_counter
-
-from main.modules.AnimeListHandler import MALListHandler, AnilistHandler, AnimeListHandler
+from main.modules.AnimeListHandler import AnimeListHandler
 
 try:
     import thread
@@ -10,8 +9,7 @@ except ImportError:
 from main.modules.general_utils import time_at_current_point, timeit, list_to_uint8_array, load_pickled_file
 import numpy as np
 from collections import defaultdict
-from main.modules.UserDB import UserDB
-from main.modules.filenames import scores_dict_filename
+from main.modules.filenames import scores_dict_filename, aff_db_path
 
 import pyximport  # Need this to import .pyx files
 pyximport.install(setup_args={"include_dirs": np.get_include()})  # Need to manually include numpy or it won't work
@@ -24,52 +22,20 @@ def find_max_affinity(username, site="MAL", min_common_shows=20):
     between the user provided and each person (unless a limit is given) in the database.
     The affinity is calculated via Pearson's Correlation Coefficient.
 
-        Parameters :
+    :param username - The MAL username of the user for whom the function tries to find
+                       the user with the max affinity amongst the ones in the database.
 
-            username - The MAL username of the user for whom the function tries to find
-                       the user with the max affinity amongst the ones in the database
+    :param site - The scoring site used (MAL/Anilist/etc)
 
-            amount - Maximum amount of people to check. If amount exceeds the actual
-                     amount of users in the database, the entire database will be iterated
-                     over."""
-
-    # def initial_user_prompt():
-    #     while(True):
-    #         x = input(f"Current database size is {user_db.main_df.shape[0]}. Continue? Y/N")
-    #         if x == 'Y':
-    #             return
-    #         if x == 'N':
-    #             amount = int(input("Insert new database size"))
-    #             user_db.fill_main_database(amount)
-
-    user_db = UserDB()
+    :param min_common_shows - The minimum common shows needed for the person to be included
+    in the final statistics. 20 is the default used by MAL.
+    """
 
     t1 = perf_counter()
-    # username_list = list(user_db.scores_dict.keys())
-
-    # user_list = None
-    # if site == "MAL":
-    #     try:
-    #         user_list = user_db.scores_dict[username]
-    #         # Maybe user's already in database and we can save time
-    #         # Remove this later cause outdated
-    #     except KeyError:
-    #         user_list = MALListHandler(username).get_user_scores_list()
-    # else:
-    #     user_list = AnilistHandler(username).get_user_scores_list()
     ListHandler = AnimeListHandler.get_concrete_handler(site)
     user_list = ListHandler(username).get_user_scores_list()
-    # user_list = user_db.scores_dict[username]
-    # if site == "MAL":
-    #     user_list = MALListHandler(username).get_user_scores_list()
-    # else:
-    #     user_list = AnilistHandler(username).get_user_scores_list()
-
     user_list = list_to_uint8_array(user_list)
 
-    # if user_list is None:
-    #     user_list =
-    #     #change this to new style
     affinities_list = defaultdict()
 
     time_at_current_point(t1, "Start")
@@ -78,12 +44,18 @@ def find_max_affinity(username, site="MAL", min_common_shows=20):
     neg_aff_count = 0
     avg_aff = 0
 
-    filename = str(scores_dict_filename).split(".")[0]
-    for i in range(100):
+    filename = scores_dict_filename.split(".")[0]
+    if str(aff_db_path).startswith("/mnt"):
+        symbol = "/"
+    else:
+        symbol = "\\"
+
+    for i in range(99):
         scores_dict = {}
         for _ in range(300):
+            # Retry until there's no conflict between processes
             try:
-                scores_dict = load_pickled_file(f"{filename}-PP{i+1}.pickle")
+                scores_dict = load_pickled_file(f"{aff_db_path}{symbol}{filename}-P{i+1}.pickle")
                 break
             except OSError:
                 continue
@@ -117,13 +89,7 @@ def find_max_affinity(username, site="MAL", min_common_shows=20):
     avg_aff /= user_count
 
     sorted_aff_dict_items = sorted(affinities_list.items(), reverse=True, key=lambda x: x[1]['Affinity'])
-    pos_affinities = {user: user_dict for user, user_dict in sorted_aff_dict_items[0:50]}
-    neg_affinities = {user: user_dict for user, user_dict in sorted_aff_dict_items[-1:-51:-1]}
-    zero_affinity = user_count - pos_aff_count - neg_aff_count
-
-    print(f"Your average affinity is : {avg_aff}%")
-    print(f"Positive affinity : {pos_aff_count},{round(100 * pos_aff_count / user_count, 2)}%")
-    print(f"Negative affinity : {neg_aff_count},{round(100 * neg_aff_count / user_count, 2)}%")
-    print(f"Zero affinity count : {zero_affinity},{round(100 * zero_affinity/ user_count, 2)}%")
+    pos_affinities = {user: user_dict for user, user_dict in sorted_aff_dict_items[0:500]}
+    neg_affinities = {user: user_dict for user, user_dict in sorted_aff_dict_items[-1:-501:-1]}
 
     return pos_affinities, neg_affinities

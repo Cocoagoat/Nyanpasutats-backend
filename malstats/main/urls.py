@@ -15,6 +15,6 @@ urlpatterns = [
     path("img_urls/", views.get_anime_img_urls, name="img_urls"),
     path('tasks/', views.get_task_data, name='tasks'),
     path('queue_pos/', views.get_queue_position, name='queue_pos'),
-    path('recent_users/', views.username_cache_view, name='recent_users'),
+    # path('recent_users/', views.username_cache_view, name='recent_users'),
     path('update_img_url/', views.update_image_url_view, name='update_img_url')
 ]

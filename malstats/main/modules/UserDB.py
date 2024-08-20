@@ -60,19 +60,20 @@ class UserDB:
         """The class is a Singleton - we only need one instance of it since its purpose is
         to house and create on demand all the data structures that are used in this project."""
         if cls._instance is None:
-            cls._instance = super().__new__(cls, *args, **kwargs)
+            cls._instance = super().__new__(cls)
             cls._instance._df = None
             cls._instance._MAL_user_list = None
             cls._instance._blacklist = None
             cls._instance._scores_dict = None
             cls._instance._columns = None
             cls._instance._schema_dict = None
-            cls._instance._filtered_df = None
             cls._instance.anime_db = AnimeDB()
+            cls._user_amount = 0
+            # cls.continue_filling = kwargs.get('continue_filling', False)
         return cls._instance
 
-    def __init__(self):
-        pass
+    def __init__(self, continue_filling=False):
+        self.continue_filling = continue_filling
         # All properties are loaded on demand
 
     stats = ["Index", "Username", "Mean Score", "Scored Shows"]
@@ -80,9 +81,9 @@ class UserDB:
     @property
     def df(self):
 
-        def user_prompted_filling():
-            # return (input("Continue filling database? Y/N") == 'Y')
-            return False
+        # def user_prompted_filling():
+        #     # return (input("Continue filling database? Y/N") == 'Y')
+        #     return True
 
         """Polars database (stored as .parquet), contains username
         + mean score + scored shows + all the scores of each user in it."""
@@ -98,11 +99,13 @@ class UserDB:
                 print("User database not found. Creating new user database")
                 self._df = pl.DataFrame(schema=self.schema_dict)
 
-            continue_filling = not file_loaded or user_prompted_filling()
-            if continue_filling:
+            # continue_filling = not file_loaded or self.continue_filling
+            if self.continue_filling or not file_loaded:
                 amount = int(input("Insert the desired amount of users\n"))
+                self._user_amount = amount
                 self.fill_main_database(amount)
 
+        self._user_amount = len(self._df)
         return self._df
 
     @df.setter
@@ -117,14 +120,19 @@ class UserDB:
         print("Beginning to split main database")
         df_size = len(self.df)
         part_size = int(df_size/parts)
+
+        partials_folder_path = Path(f'{str(user_database_name.parent).split(".")[0]}\\Partials')
+        if not os.path.exists(partials_folder_path):
+            os.mkdir(partials_folder_path)
+
         for i in range(parts):
             print(f"Currently on part {i+1}")
             if i != parts-1:
                 df_part = self.df[i*part_size: (i+1)*part_size]
             else:
                 df_part = self.df[i*part_size:df_size]  # In case df_size/parts was rounded down by the casting
-            df_part.write_parquet(f'{str(user_database_name.parent).split(".")[0]}\\Partials'
-                                  f'\\{str(user_database_name.name).split(".")[0]}-P{i+1}.parquet')
+            df_part.write_parquet(partials_folder_path
+                                  / f'{str(user_database_name.name).split(".")[0]}-P{i+1}.parquet')
 
     def get_df_part(self, i):
         try:
@@ -152,7 +160,7 @@ class UserDB:
         if not self._scores_dict:
             print("Unpickling main scores dictionary")
             try:
-                self._scores_dict = load_pickled_file(scores_dict_filename)
+                self._scores_dict = load_pickled_file(scores_dict_filepath)
             except FileNotFoundError:
                 print("Pickled dictionary not found. Checking for main database")
                 if not isinstance(self._df, pl.DataFrame) or self._df.is_empty():
@@ -162,12 +170,12 @@ class UserDB:
                     print("Confirmed existence of main database. Converting to dictionary")
                     # This should never happen unless dict got manually deleted
                     self.__main_db_to_pickled_dict()
-                    self._scores_dict = load_pickled_file(scores_dict_filename)
+                    self._scores_dict = load_pickled_file(scores_dict_filepath)
             except EOFError:
                 # This should never happen after the debugging stage is over
                 print("Pickle file is corrupted, converting main database.")
                 self.__main_db_to_pickled_dict()
-                self._scores_dict = load_pickled_file(scores_dict_filename)
+                self._scores_dict = load_pickled_file(scores_dict_filepath)
         return self._scores_dict
 
     @scores_dict.setter
@@ -178,14 +186,15 @@ class UserDB:
             raise ValueError("scores_dict must be a dictionary")
 
     def split_scores_dict(self):
-        filename = str(scores_dict_filename).split(".")[0]
+        split_full_path = str(scores_dict_filepath).split("\\")
+        path, filename = '\\'.join(split_full_path[:-1]), split_full_path[-1].split(".")[0]
         for i in range(100):
-            size = round(len(self.scores_dict)/10)
+            size = round(len(self.scores_dict)/100)
             dict_part_i = dict(list(self.scores_dict.items())[i*size:(i+1)*size])
-            save_pickled_file(f"{filename}-P{i+1}.pickle", dict_part_i)
+            save_pickled_file(Path(path) / "Partials" / f"{filename}-P{i+1}.pickle", dict_part_i)
 
     def save_scores_dict(self):
-        with open(scores_dict_filename, 'wb') as file:
+        with open(scores_dict_filepath, 'wb') as file:
             pickle.dump(self.scores_dict, file)
 
     def __main_db_to_pickled_dict(self):
@@ -196,7 +205,7 @@ class UserDB:
         usernames = self.main_df["Username"]
         scores_dict = score_df.transpose(column_names=usernames).to_dict(as_series=False)
         self._scores_dict = {key: list_to_uint8_array(value) for key, value in scores_dict.items()}
-        with open(scores_dict_filename, 'wb') as file:
+        with open(scores_dict_filepath, 'wb') as file:
             pickle.dump(self.scores_dict, file)
 
     @property
@@ -265,7 +274,9 @@ class UserDB:
         save_list_to_csv(self._blacklist, blacklist_users_filename)
         print(f"Saving scores dictionary")
         self.save_scores_dict()
-        self.split_scores_dict()
+        if len(usernames) == self._user_amount:
+            print("Splitting scores dictionary")
+            self.split_scores_dict()
         print("Finished saving")
 
     # @timeit
@@ -288,7 +299,7 @@ class UserDB:
                 show_amount = 0
                 score_sum = 0
                 account_age_verified = False
-                for anime in user_list:
+                for anime in user_list.list_obj:
                     title = anime['node']['title']
                     score = anime['list_status']['score']
 

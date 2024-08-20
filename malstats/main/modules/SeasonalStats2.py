@@ -1,9 +1,11 @@
 import numpy as np
+import polars as pl
+from main.modules.filenames import anime_database_updated_name
 from main.modules.AnimeDB import AnimeDB
 from main.modules.AnimeListFormatter import ListFormatter
 from main.modules.AnimeListHandler import AnimeListHandler
 from main.modules.MAL_utils import *
-from main.models import AnimeData
+from main.models import AnimeData, AnimeDataUpdated
 from main.modules.Tags import Tags
 from main.modules.general_utils import snake_to_camel, timeit
 from collections import defaultdict
@@ -45,7 +47,7 @@ class Season:
         return self.total_score / self.scored_shows if self.scored_shows else 0
 
     def get_db_objects_of_shows(self):
-        return get_objects_preserving_order(AnimeData,
+        return get_objects_preserving_order(AnimeDataUpdated,
                                             self.show_list.keys(), 'name')
 
     def sort_show_list(self):
@@ -145,6 +147,7 @@ class SeasonalStats2:
         self.user_list = None
         self.anime_data = None
         self.tags = Tags()
+        self.anime_db = pl.read_parquet(anime_database_updated_name)
 
     @property
     def full_stats(self):
@@ -160,8 +163,12 @@ class SeasonalStats2:
 
     def __initialize_seasonal_stats(self):
         for anime in self.anime_data:
-
-            if anime.episodes >= 6:  # OVAs or movies don't count as part of the season
+            # test = self.anime_data
+            # if not anime.type:
+            #     print("ERROR")
+            if anime.episodes >= 6 or ((anime.year == datetime.datetime.now().year) and (
+                    anime.season == (datetime.datetime.now().month-1)//3 + 1) and anime.type and (
+                    int(anime.type) == 1)):  # OVAs or movies don't count as part of the season
                 try:
                     season_name = Seasons(anime.season).name  # Seasons are listed as 1,2,3,4 in the database
                 except AttributeError:
@@ -172,7 +179,6 @@ class SeasonalStats2:
 
                 full_season_name = f"{season_name} {anime.year}"
                 if not full_season_name:
-                    print("If this got printed don't remove")
                     continue  # remove?
                 self._full_stats.add_show_to_season(full_season_name, anime.name,
                                                     user_score, user_list_status)
@@ -345,6 +351,7 @@ class SeasonalStats2:
             season_stats.most_unusual_show = most_unusual_score
 
     def _add_affinity(self):
+        # anime_db = AnimeDB()
         for season_name, season_stats in self._full_stats:
             user_show_list = season_stats.show_list
             user_scores = np.array([user_show_list[title]
@@ -354,11 +361,13 @@ class SeasonalStats2:
             #               for anime in self.anime_data.filter(
             #         name__in=user_show_list.keys())}
 
-            user_show_objects = get_objects_preserving_order(
-                AnimeData, user_show_list.keys(), 'name')
+            # user_show_objects = get_objects_preserving_order(
+            #     AnimeDataUpdated, user_show_list.keys(), 'name')
 
-            MAL_scores = np.array([float(anime.mean_score) if anime else 0
-                         for anime in user_show_objects])
+            user_seasonal_shows = self.anime_db.select(user_show_list.keys())
+            MAL_scores = np.array(user_seasonal_shows[AnimeDB.stats["Mean Score"]].row(0))
+            # MAL_scores = np.array([float(anime.mean_score) if anime else 0
+            #              for anime in user_show_objects])
 
             non_zero_mask = (user_scores != 0) & (MAL_scores != 0)
 
@@ -382,10 +391,8 @@ class SeasonalStats2:
 
     @timeit
     def get_user_seasonal_stats2(self):
-
+        # Main function
         tags = Tags()
-        # user_list_sent = bool(user_list)
-
         ListHandler = AnimeListHandler.get_concrete_handler(self.site)
         self.user_list = ListHandler(self.username).anime_list.list
         self.user_list = {show: stats for show, stats in self.user_list.items()
@@ -396,15 +403,19 @@ class SeasonalStats2:
             self.user_list = {title: stats for title, stats
                               in self.user_list.items()
                               if title in tags.show_tags_dict.keys()}
+            # or title in new anime db but not in old anime db?
 
-        self.anime_data = AnimeData.objects.filter(name__in=self.user_list.keys())
+        self.anime_data = AnimeDataUpdated.objects.filter(name__in=self.user_list.keys())
         # The SQLite DB object with data on all anime
 
         self.__initialize_seasonal_stats()
+        test = self._full_stats
         self._full_stats = self.filter_by_min_shows(self._full_stats)
         self._full_stats.sort_show_lists()
+
         self._add_stat("avg_score")
         self._full_stats.sort_seasons_by_attribute("avg_score")
+
         for stat in SeasonalStats2.STAT_NAMES:
             self._add_stat(stat)
         self._full_stats.sort_seasons_by_attribute("name")

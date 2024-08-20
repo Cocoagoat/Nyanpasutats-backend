@@ -1,6 +1,4 @@
 import logging
-import os
-from pathlib import Path
 from .filenames import logging_path
 
 # Define the base configuration

@@ -1,10 +1,10 @@
 from abc import ABC, abstractmethod
 from main.modules.MAL_utils import MALUtils
-
 from datetime import datetime
 
 
 class AnimeEntryHandler(ABC):
+    """Exists to have generic methods for extracting stats from MAL and Anilist show entries."""
     STAT_NAMES = ["score", "title", "list_status", "num_watched", "id", "updated_at"]
 
     def __init__(self):

@@ -7,7 +7,6 @@ from .modules.Model import Model
 from pathlib import Path
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from .modules.filenames import current_model_name
 from django.core.cache import cache
 from rest_framework.decorators import api_view, renderer_classes
 from rest_framework.renderers import JSONRenderer, TemplateHTMLRenderer
@@ -20,7 +19,7 @@ from .modules.Errors import UserListFetchError
 from .modules.SeasonalStats import SeasonalStats
 from .modules.MAL_utils import get_data
 from .tasks import get_user_seasonal_stats_task, get_user_recs_task, get_user_affs_task
-from .models import AnimeData, TaskQueue, UsernameCache
+from .models import AnimeData, TaskQueue, UsernameCache, AnimeDataUpdated
 from .modules.UserDB import UserDB
 import logging
 import requests
@@ -39,7 +38,7 @@ view_logger = logging.getLogger('Nyanpasutats.view')
 #         return Response(data)
 
 
-user_db = UserDB()
+# user_db = UserDB()
 CACHE_TIMEOUT = 3600
 TASK_TIMEOUT = 3600
 
@@ -104,8 +103,11 @@ def get_task_data(request):
                          'data': 'Task was unable to complete on time.'}, status=500)
 
 
-def get_queue_position(request):
-    return JsonResponse({'queuePosition': (len(TaskQueue.objects.all()) + 1)}, status=200)
+# class QueueView(APIView):
+#     @staticmethod
+#     def get(request):
+#         print("Inside get_queue_position", cache.get('tasks_in_queue'))
+#         return Response({'queuePosition': cache.get('tasks_in_queue')}, status=200)
 
 
 # @method_decorator(cache_page(60 * 60), name='dispatch')
@@ -129,26 +131,6 @@ class RecommendationsView(APIView):
 
 
 # @method_decorator(cache_page(60 * 60), name='dispatch')
-class SeasonalStatsView(APIView):
-    @staticmethod
-    def get(request):
-        username = request.query_params.get('username')
-        site = request.query_params.get('site')
-        if not username:
-            return Response("Username is required", status=400)
-
-        task = get_user_seasonal_stats_task.delay(username, site)
-        TaskQueue.objects.create(task_id=task.id)
-        # task_position = len(TaskQueue.objects.all())
-
-        UsernameCache.objects.get_or_create(username=username)
-        print(f"Returning response with taskId of {task.id} from SeasonalStatsView")
-        return Response({'taskId': task.id},
-                        # 'queuePosition': task_position},
-                        status=202)
-
-
-@method_decorator(cache_page(60 * 60), name='dispatch')
 class AffinityFinderView(APIView):
     @staticmethod
     def get(request):
@@ -167,15 +149,48 @@ class AffinityFinderView(APIView):
                         status=202)
 
 
+# @method_decorator(cache_page(60 * 60), name='dispatch')
+class SeasonalStatsView(APIView):
+    @staticmethod
+    def get(request):
+        username = request.query_params.get('username')
+        site = request.query_params.get('site')
+        if not username:
+            return Response("Username is required", status=400)
+
+        task = get_user_seasonal_stats_task.delay(username, site)
+        TaskQueue.objects.create(task_id=task.id)
+        # task_position = len(TaskQueue.objects.all())
+
+        UsernameCache.objects.get_or_create(username=username)
+        print(f"Returning response with taskId of {task.id} from SeasonalStatsView")
+        print("Inside seasonal_stats_view", cache.get('tasks_in_queue'))
+        return Response({'taskId': task.id},
+                        # 'queuePosition': task_position},
+                        status=202)
+
+
 @api_view(('GET',))
 @renderer_classes((JSONRenderer,))
 def get_anime_img_url(request):
     show_name = unquote(request.GET.get('show_name', ''))
     try:
-        image_url = AnimeData.objects.get(name=show_name).image_url
+        image_url = AnimeDataUpdated.objects.get(name=show_name).image_url
         return Response(image_url)
-    except AnimeData.DoesNotExist:
+    except AnimeDataUpdated.DoesNotExist:
         return Response("Show name does not exist.", status=400)
+
+
+@api_view(('GET',))
+@renderer_classes((JSONRenderer,))
+def get_queue_position(request):
+    test = request.GET.get('test', '[]')
+    print("Inside get_queue_position", test)
+    cache_info = cache.client.get_client().connection_pool.connection_kwargs
+    print("Cache configuration (get_queue_position):", cache_info)
+    print("Inside get_queue_position", cache.get('tasks_in_queue', 1))
+    # view_logger.error("Inside get_queue_position", cache.get('tasks_in_queue', 0))
+    return Response({'queuePosition': cache.get('tasks_in_queue', 1)}, status=200)
 
 
 @api_view(('GET',))
@@ -194,7 +209,7 @@ def get_anime_img_urls(request):
     try:
         preserve_order = Case(*[When(name=name, then=pos) for pos, name in enumerate(show_names_list)])
         # anime_data = AnimeData.objects.filter(name__in=show_names_list).annotate(ordering=preserve_order).order_by('ordering').values('image_url', 'name')
-        anime_data = [AnimeData.objects.get(name=show) for show in show_names_list]
+        anime_data = [AnimeDataUpdated.objects.get(name=show) for show in show_names_list]
 
         image_urls = [data.image_url for data in anime_data]
 
@@ -206,20 +221,20 @@ def get_anime_img_urls(request):
                           for data in anime_data]
 
         return Response(image_urls)
-    except AnimeData.DoesNotExist:
+    except AnimeDataUpdated.DoesNotExist:
         return Response("One or more of the shows requested does not exist.", status=400)
 
 
-def username_cache_view(request):
-    username = request.GET.get('username')
-    user_list = UsernameCache.objects.values_list('username', flat=True)
-    print(user_list)
-    print(username)
-    if username in user_list:
-        return JsonResponse({'UserFound': True})
-    else:
-        # UsernameCache.objects.create(username=username)
-        return JsonResponse({'UserFound': False})
+# def username_cache_view(request):
+#     username = request.GET.get('username')
+#     user_list = UsernameCache.objects.values_list('username', flat=True)
+#     print("Current usernames : ",user_list)
+#     print("Username to find : ", username)
+#     if username in user_list:
+#         return JsonResponse({'UserFound': True})
+#     else:
+#         # UsernameCache.objects.create(username=username)
+#         return JsonResponse({'UserFound': False})
 
 
 @require_POST
@@ -230,8 +245,8 @@ def update_image_url_view(request):
     show_name = data.get('show_name')
     print(show_name)
     try:
-        existing_show_data = AnimeData.objects.get(name=show_name)
-    except AnimeData.DoesNotExist:
+        existing_show_data = AnimeDataUpdated.objects.get(name=show_name)
+    except AnimeDataUpdated.DoesNotExist:
         return JsonResponse({'added': False, 'error': 'Show does not exist'}, status=400)
 
     show_id = existing_show_data.mal_id

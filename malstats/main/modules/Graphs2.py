@@ -1,7 +1,7 @@
-
+from colorama import Fore
 from main.modules.AnimeDB import AnimeDB
 from main.modules.general_utils import *
-from igraph import Graph, summary, union
+from igraph import Graph
 import networkx as nx
 import matplotlib.pyplot as plt
 from main.modules.filenames import *
@@ -15,9 +15,19 @@ class AnimeGraph(Graph):
         self._titles = None
         super().__init__(*args, **kwargs)
 
+    def __eq__(self, G2):
+        if self.vs['name'] == G2.vs['name'] and len(self.es) == len(G2.es):
+            return True
+        return False
+
     @property
     def titles(self):
         return [] if not self.vs else self.vs['name']
+
+    def delete_edge_if_exists(self, index1, index2):
+        edge_to_delete = self.get_eid(index1, index2, directed=True, error=False)
+        if edge_to_delete != -1:
+            self.delete_edges(edge_to_delete)
 
     def inplace_union(self, G2):  # Put this outside?
         for vertex in G2.vs:
@@ -42,18 +52,66 @@ class AnimeGraph(Graph):
         for vertex in G.vs:
             vertex_edge_list = vertex.incident()
             for edge in vertex_edge_list:
-                v1, v2 = edge.vertex_tuple
+                try:
+                    v1, v2 = edge.vertex_tuple
+                except ValueError:
+                    continue
 
                 relation_type = edge['relation']
-                if anime_db.are_separate_shows(v1['name'], v2['name'], relation_type):
+                if anime_db.are_separate_shows(v1['name'], v2['name'], relation_type
+                                               ) or self.separate_show_exists_in_subgraph(v1, v2,
+                                                                                     relation_type):
                     edges_to_delete.append((v1.index, v2.index))
                     edges_to_delete.append((v2.index, v1.index))
 
         for v1, v2 in edges_to_delete:
-            edge_to_delete = G.get_eid(v1, v2, directed=True, error=False)
-            if edge_to_delete != -1:
-                G.delete_edges(edge_to_delete)
+            G.delete_edge_if_exists(v1, v2)
+
+        if len(G.es) != len(self.es):
+            return G.split()
         return G
+
+    def separate_show_exists_in_subgraph(self, v1, v2, relation_type):
+        anime_db = AnimeDB()
+        if relation_type not in ['other', 'spin-off', 'side_story', 'parent_story']:
+            return False
+
+        show_lengths = anime_db.get_stats_of_shows([v1['name'], v2['name']], ['Episodes', 'Duration'])
+        try:
+            v1_length = show_lengths[v1['name']]['Episodes'] * show_lengths[v1['name']]['Duration']
+            v2_length = show_lengths[v2['name']]['Episodes'] * show_lengths[v2['name']]['Duration']
+        except KeyError:
+            return False
+
+        longer_show, shorter_show = (v1['name'], v2['name']) if v1_length > v2_length else (v2['name'], v1['name'])
+
+        G_copy = copy.deepcopy(self)
+
+        old_subgraphs = G_copy.connected_components(mode='WEAK').subgraphs()
+
+        G_copy.delete_edge_if_exists(v1, v2)
+        G_copy.delete_edge_if_exists(v2, v1)
+
+        connected_components = G_copy.connected_components(mode='WEAK')
+        if len(connected_components) == len(old_subgraphs):
+            return False
+
+        new_subgraphs = connected_components.subgraphs()
+        for new_graph in new_subgraphs:
+            if shorter_show in new_graph.vs['name']:
+                subgraph = new_graph
+
+        for v in subgraph.vs:
+            if anime_db.are_separate_shows(longer_show, v['name'], relation_type):
+                return True
+
+        return False
+
+    def delete_duplicate_edges(self):
+        for edge1 in self.es:
+            for edge2 in self.es:
+                if edge1 != edge2 and edge1.target == edge2.target and edge1.source == edge2.source:
+                    self.delete_edges(edge2.index)
 
     def determine_main_show(self):
         """The main show for each graph will be the one with the most members (to avoid graphs
@@ -84,7 +142,6 @@ class AnimeGraph(Graph):
 
         # Converting the graph to a different library since igraph x matplotlib caused some issues.
         networkx_graph = self.to_networkx()
-        edge_labels = nx.get_edge_attributes(networkx_graph, 'relation')
 
         # Plotting the graph itself in a separate 5120x2880 window (biggest possible size to see as much detail
         # as possible, even this won't be enough for the most crowded graphs.
@@ -155,7 +212,7 @@ class GraphCollection():
 
     @property
     def related_shows(self):
-        if not self._related_shows:
+        if not self._related_shows or len(self._related_shows) != len(self.graphs):
             self._related_shows = {}
             for key, graph in self.graphs.items():
                 self._related_shows[key] = graph.vs['name']
@@ -204,12 +261,11 @@ class GraphCollection():
             else:
                 # If the main show wasn't deleted, we'll simply re-attach the new graph to it.
                 new_keys.append(key)
-        # new_graphs = {k : test_graphs.pop(k) for key in new_keys}
-        # old_graphs = copy.deepcopy(self.all_graphs)
+
         self.graphs = {new_key: self.graphs.pop(old_key)
-                                      for old_key, new_key in list(zip(old_keys, new_keys))}
+                       for old_key, new_key in list(zip(old_keys, new_keys))}
         self.graphs.pop('')
-        save_pickled_file(graphs_dict_no_low_scores_filename, self.graphs)
+        save_pickled_file(graphs_dict_no_low_scores_filename, self)
 
 
 class GraphCreator():
@@ -232,9 +288,6 @@ class GraphCreator():
               f'related_anime,genres,' \
               f'average_episode_duration,num_episodes,num_scoring_users'
 
-        fail_count = 0
-        # current_anime = call_function_through_process(get_search_results, url)
-        # put this in separate function
         current_anime = None
         while not current_anime:
             try:
@@ -245,22 +298,6 @@ class GraphCreator():
                 current_anime = None
             except UserDoesNotExistError:
                 return
-
-        # current_anime = get_data(url)
-
-        # Add filter for getting none because 404 garbage
-        # while current_anime is None:  # turn this into decorator later, also change the None to not what we want
-        #     fail_count += 1
-        #
-        #     print(current_anime)
-        #     time.sleep(30)  # Just in case
-        #     print("Anime was returned as None, sleeping and retrying")
-        #     # current_anime = call_function_through_process(get_search_results, url)
-        #     current_anime = get_search_results(url)
-        #     if fail_count == 10:
-        #         print("Failed to fetch resource 10 times in a row")
-        #
-        #         time.sleep(1800)
 
         title = current_anime['title']
         print(Fore.LIGHTWHITE_EX + f"Currently on title {title}")
@@ -306,27 +343,6 @@ class GraphCreator():
 
     def create_graphs(self, filename=None):
 
-        # if os.path.exists(data_path / "temp_graph_collection.pickle"):
-        #     self._graph_collection = load_pickled_file(data_path / "temp_graph_collection.pickle")
-        # else:
-        #     self._graph_collection = {}
-
-        # processed_anime = list(set([x for G in list(self._graph_collection.values()) for x in G.titles]))
-        #
-        # db_dict = anime_db.to_dict(as_series=False)
-        # del db_dict['Rows']
-        #
-        # relevant_stats = {title: {'ID': show_stats[self.anime_db.stats["ID"]],
-        #                           'Year': show_stats[self.anime_db.stats["Year"]],
-        #                           'Season': show_stats[self.anime_db.stats["Season"]]
-        #                           } for title, show_stats in db_dict.items()}
-        #
-        # relevant_ids_titles = {title: int(stats['ID'])
-        #                        for title, stats in sorted(relevant_stats.items(),
-        #                                                   key=lambda x: (x[1]['Year'], x[1]['Season']))}
-        #
-        # relevant_titles = list(relevant_ids_titles.keys())
-
         relevant_ids = [self.anime_db.get_id_by_title(title) for title in self.relevant_titles]
 
         for title, ID in list(zip(self.relevant_titles, relevant_ids)):
@@ -349,8 +365,11 @@ class GraphCreator():
             if len(self._graph_collection.graphs) % 5 == 0 or title == self.relevant_titles[-1]:
                 save_pickled_file(temp_graphs_dict_filename, self._graph_collection)
 
+        for _, graph in self._graph_collection.items():
+            graph.delete_duplicate_edges()
+
+        save_pickled_file(data_path / "unsplit_graphs.pickle", self._graph_collection)
         self._graph_collection.split_graphs()
-        # self._all_graphs = self.split_graphs(self._graph_collection)
 
         filename = filename if filename else graphs_dict_filename
         save_pickled_file(filename, self._graph_collection)
@@ -375,12 +394,6 @@ class Graphs2:
 
     def __init__(self):
         self.anime_db = AnimeDB()
-        pass
-        # All properties are loaded on demand
-        # self.graph_creator = GraphCreator()
-        # self._all_graphs = None
-        # self._related_shows = None
-        # self.anime_db = AnimeDB()
 
     def initialize_graph_collection(self, no_low_scores=False):
         filename = graphs_dict_no_low_scores_filename if no_low_scores else graphs_dict_filename
@@ -413,7 +426,6 @@ class Graphs2:
                 irrelevant_titles = [x for x in self.all_graphs.all_titles
                                      if x not in relevant_titles]
                 self._all_graphs_no_low_scores = copy.deepcopy(self.all_graphs)
-                # print(len(self._all_graphs_no_low_scores))
                 self._all_graphs_no_low_scores.remove_entries(irrelevant_titles)
 
             else:
@@ -431,61 +443,5 @@ class Graphs2:
         if not self._all_graphs_no_low_scores:
             self.initialize_graph_collection(no_low_scores=True)
         return self._all_graphs_no_low_scores
-            # def condition_func(show_stats: dict):
-            #     if int(show_stats[AnimeDB.stats["Scores"]]) >= 2000 \
-            #             and show_stats[AnimeDB.stats["Duration"]] * \
-            #             show_stats[AnimeDB.stats["Episodes"]] >= 15 \
-            #             and show_stats[AnimeDB.stats["Duration"]] >= 3 \
-            #             and show_stats[AnimeDB.stats["Mean Score"]] >= 6.5:
-            #             # and show_stats[AnimeDB.stats["Year"]] >= 2021 \
-            #             # and show_stats[AnimeDB.stats["Year"]] <= 2022:
-            #         # and show_stats[AnimeDB.stats["Scores"]]<=80000:
-            #         return True
-            #     return False
-            # # old_keys = self.all_graphs.keys()
-            # # new_keys = []
-            # self._all_graphs_no_low_scores = copy.deepcopy(self.all_graphs)
-            #
-            # # Get all titles that meet the score condition + the basic conditions
-            # relevant_titles = self.anime_db.filter_titles(condition_func)
-            # irrelevant_titles = [x for x in self.all_graphs.all_titles
-            #                      if x not in relevant_titles]
-            #
-            # self._all_graphs_no_low_scores.remove_entries(irrelevant_titles)
-
-
-            # Loop over all graphs in the dictionary without score conditions.
-            # Note : we loop over the copy since we'll be removing vertices and we don't
-            # want to alter the original graph.
-        #     for key, graph in all_graphs.items():
-        #
-        #         # For each graph, remove the vertices that don't meet the score condition
-        #         for title in graph.titles:
-        #             if title not in relevant_titles:
-        #                 graph.delete_vertices(title)
-        #
-        #         if key not in graph.vs['name']:
-        #             # If a main show (a key) was deleted and its graph still has some shows left,
-        #             # (for example, this could happen if S1 of a show had a score of 6.4 but
-        #             # S2 has a score of 6.6), we need to determine the new main show.
-        #             if graph:
-        #                 main_show = graph.determine_main_show()
-        #                 new_keys.append(main_show)
-        #             # If a show was deleted and its graph is now empty, we only need to put an
-        #             # empty space in new_keys so that the order of the graphs get preserved when
-        #             # the new dictionary gets created from new_keys. We will then delete this
-        #             # dummy key.
-        #             else:
-        #                 new_keys.append("")
-        #         else:
-        #             # If the main show wasn't deleted, we'll simply re-attach the new graph to it.
-        #             new_keys.append(key)
-        #     # new_graphs = {k : test_graphs.pop(k) for key in new_keys}
-        #     # old_graphs = copy.deepcopy(self.all_graphs)
-        #     self._all_graphs_no_low_scores = GraphCollection({new_key: all_graphs.pop(old_key)
-        #                                      for old_key, new_key in list(zip(old_keys, new_keys))})
-        #     self._all_graphs_no_low_scores.pop('')
-        #     save_pickled_file(graphs_dict_no_low_scores_filename, self._all_graphs_no_low_scores)
-        # return self._all_graphs_no_low_scores
 
 

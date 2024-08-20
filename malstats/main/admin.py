@@ -5,5 +5,6 @@ from .models import *
 admin.site.register(UsernameCache)
 admin.site.register(TaskQueue)
 admin.site.register(AnimeData)
+admin.site.register(AnimeDataUpdated)
 
 # Register your models here.

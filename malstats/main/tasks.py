@@ -1,7 +1,10 @@
-from .modules.Model import Model
+import time
+
+from .modules.Model2 import Model, UserScoresPredictor
 from pathlib import Path
 from django.core.cache import cache
-
+from .modules.filenames import main_model_path
+import tensorflow as tf
 from .modules.SeasonalStats2 import SeasonalStats2
 from .modules.filenames import current_model_name
 from celery import shared_task, Task
@@ -11,13 +14,17 @@ from .modules.SeasonalStats import SeasonalStats  # Assuming the logic resides h
 from .modules.Errors import UserListFetchError
 from .modules.AffinityFinder import find_max_affinity
 from .models import TaskQueue
+from django.core.management import call_command
 import logging
+
+logger = logging.getLogger(__name__)
 
 
 current_dir = Path(__file__).parent
 model = None
 user_db = None
 CACHE_TIMEOUT = 3600
+# tf.config.set_visible_devices([], 'GPU')
 
 view_logger = logging.getLogger('Nyanpasutats.view')
 
@@ -28,29 +35,45 @@ view_logger = logging.getLogger('Nyanpasutats.view')
 
 
 class MyTask(Task):
-    def on_success(self, retval, task_id, args, kwargs):
-        print("Task success")
-        try:
-            print("Attempting to delete task ", task_id)
-            self.delete_task(task_id)
-        except TaskQueue.DoesNotExist:
-            print(f"Unable to delete task {task_id}")
-            view_logger.error(f"Unable to delete task {task_id}")
+    def after_return(self, status, retval, task_id, args, kwargs, einfo):
+        """ This method runs after the task finishes regardless of its state. """
+        super().after_return(status, retval, task_id, args, kwargs, einfo)
+        if status == "SUCCESS":
+            print("Task success")
+        elif status == "FAILURE":
+            print("Task failed")
 
-    def on_task_failure(self, retval, task_id, args, kwargs):
-        print("Task failed")
-        try:
-            self.delete_task(task_id)
-        except TaskQueue.DoesNotExist:
-            print(f"Unable to delete task {task_id}")
-            view_logger.error(f"Unable to delete task {task_id}")
+        # Decrement the counter in Redis
+        print("Before decrementing", cache.get('tasks_in_queue'))
 
-    @staticmethod
-    def delete_task(task_id):
-        print(f"Fetching task {task_id} to delete")
-        task = TaskQueue.objects.get(task_id=task_id)
-        print("Deleting task", task)
-        task.delete()
+        cache_info = cache.client.get_client().connection_pool.connection_kwargs
+        print("Cache configuration (after_return):", cache_info)
+
+        try:
+            cache.decr('tasks_in_queue')
+            print("Inside try")
+        except ValueError:
+            print("Error - key tasks_in_queue not found in cache")
+
+        print("After decrementing", cache.get('tasks_in_queue'))
+        time.sleep(0.03)
+
+    def before_start(self, task_id, args, kwargs):
+        try:
+            cache.incr('tasks_in_queue')
+            cache.incr('tasks_in_queue')
+        except ValueError:
+            cache.set('tasks_in_queue', 2)
+        print("Key after incrementing", cache.get('tasks_in_queue'))
+        return super().before_start(task_id, args, kwargs)
+
+    # def apply_async(self, args=None, kwargs=None, **options):
+    #     """ Increment the counter in Redis before running the task. """
+    #     try:
+    #         cache.incr('tasks_in_queue')
+    #     except ValueError:
+    #         cache.set('tasks_in_queue', 1)
+    #     return super().apply_async(args, kwargs, **options)
 
 
 
@@ -63,7 +86,6 @@ class MyTask(Task):
 # def on_task_failure(result, *args, **kwargs):
 #     print("Task failed")
 #     print(result, *args, **kwargs)
-
 
 @shared_task(base=MyTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
@@ -83,8 +105,6 @@ def get_user_seasonal_stats_task(username, site="MAL"):
         # cache.set(cache_key, result, 60) # test this
         return {'error': e.message, 'status': e.status}
     except Exception as e:
-        # I know this is bad practice, but in case of an unexpected error in fetching
-        # an individual user's stats, we do not want the site to crash.
         logging.error(f"An unexpected error has occurred. {e}")
         return {'error': "An unexpected error has occurred on our side. Please try again later.", 'status': 500}
 
@@ -96,10 +116,15 @@ def get_user_recs_task(username, site="MAL"):
     global model
     if not model:
         print("Initializing model")
-        model = Model(model_filename=current_dir / "MLmodels" / current_model_name)
+        model = Model(tf.keras.models.load_model(
+            main_model_path.parent / "Main_prediction_model.h5"))
+        # test = username
+
+    scores_predictor = UserScoresPredictor(user_name=username,
+                                           model=model, site=site,
+                                           shows_to_take="all")
     try:
-        predictions, predictions_sorted_by_diff, fav_tags, least_fav_tags = model.predict_scores(
-            username, site, db_type=1)
+        predictions, predictions_sorted_by_diff, fav_tags, least_fav_tags = scores_predictor.predict_scores()
         print("After returning from predict_scores")
         # predictions = predictions.astype(float)
         return {'Recommendations': predictions,
@@ -126,3 +151,11 @@ def get_user_affs_task(username, site="MAL"):
     except Exception as e:
         logging.error(f"An unexpected error has occurred. {e}")
         return {'error': "An unexpected error has occurred on our side. Please try again later.", 'status': 500}
+
+
+@shared_task
+def delete_expired_username_cache():
+    try:
+        call_command('delete_expired_username_cache')
+    except Exception as e:
+        logger.error(f"Error running delete_expired_username_cache task: {str(e)}")

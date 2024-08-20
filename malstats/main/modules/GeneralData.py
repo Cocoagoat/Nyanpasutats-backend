@@ -1,12 +1,9 @@
 from dataclasses import dataclass, field
 import polars as pl
-import pandas as pd
 from .Tags import Tags
 from .AnimeDB import AnimeDB
 from .UserDB import UserDB
-from .filenames import *
-import os
-from .User import User
+
 
 
 @dataclass
@@ -34,7 +31,7 @@ class GeneralData:
         tags = Tags()
         anime_db = AnimeDB()
         user_db = UserDB()
-        self.relevant_shows = list(tags.entry_tags_dict.keys())
+        self.relevant_shows = list(tags.entry_tags_dict_nls.keys())
         partial_main_df = user_db.df.select(user_db.stats + self.relevant_shows)
         partial_anime_df = anime_db.df.select(["Rows"] + self.relevant_shows)
 

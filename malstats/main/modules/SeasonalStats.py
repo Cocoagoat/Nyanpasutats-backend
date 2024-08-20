@@ -110,7 +110,7 @@ class SeasonalStats:
             genre_counts = defaultdict(int)
             for show in show_list:
                 try:
-                    show_genres = tags.entry_tags_dict[show]['Genres']
+                    show_genres = tags.entry_tags_dict_nls[show]['Genres']
                 except KeyError:
                     continue
                 for genre in show_genres:
@@ -143,7 +143,7 @@ class SeasonalStats:
                          if stats['list_status'] == "dropped" or stats['score']}
         else:
             # Filtering out sequels
-            user_list = {title: stats for title, stats in user_list.items() if title in tags.show_tags_dict.keys()}
+            user_list = {title: stats for title, stats in user_list.items() if title in tags.show_tags_dict_nls.keys()}
 
         anime_data = AnimeData.objects.filter(name__in=user_list.keys())  # The SQLite DB object
         seasonal_dict = {}

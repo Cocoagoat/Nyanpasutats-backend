@@ -1,55 +1,50 @@
+from random import random
 import pandas as pd
+from .Errors import UserListFetchError
 from .filenames import *
-import sys
-from .general_utils import *
-from .MAL_utils import *
-from tensorflow import keras
-import polars as pl
 from sklearn.model_selection import train_test_split
 import pyarrow.parquet as pq
-from keras.models import Sequential
-from keras.layers import Dense
 from keras.regularizers import l1, l2
-import matplotlib.pyplot as plt
 import os
-import re
-import time
 import numpy as np
 import tensorflow as tf
 from .UserDB import UserDB
 from .Tags import Tags
 from .AnimeDB import AnimeDB
-from .AffinityDB import AffDBEntryCreator, GeneralData, User, AffinityDB, UserAffinityCalculator
+from .AffinityDB import AffDBEntryCreator, GeneralData, User, AffinityDB
+from .general_utils import load_pickled_file
 
 
 class Model:
 
-    def __init__(self, model_filename= models_path / current_model_name, batch_size=2048, user_name=None, with_mean=False, with_extra_doubles=False,
-                 layers=3, neuron_start=1024, neuron_lower=[False, False], neuron_double=[False,False], algo="Adam", lr=0.002,
-                 loss='mean_absolute_error', epochs=50, reg=0.001):
+    def __init__(self, model_filename=models_path / current_model_name, batch_size=2048, user_name=None,
+                 with_mean=False, with_extra_doubles=False, layers=3, neuron_start=1024,
+                 neuron_lower=[False, False], neuron_double=[False, False], algo="Adam", lr=0.002,
+                 loss='mean_absolute_error', epochs=50, reg=0.001, standard=False):
 
-        tf.config.set_visible_devices([], 'GPU')
-        self.model_filename = model_filename
-        self.model = tf.keras.models.load_model(models_path / self.model_filename)
-        # self.model_type = model_type
-        self.user_name = user_name
-        self.batch_size = batch_size
-        self.with_mean = with_mean
-        self.with_extra_doubles = with_extra_doubles
+        if not standard:
+        # tf.config.set_visible_devices([], 'GPU')
+            self.model_filename = model_filename
+            # self.model = tf.keras.models.load_model(models_path / self.model_filename)
+            # self.model_type = model_type
+            self.user_name = user_name
+            self.batch_size = batch_size
+            self.with_mean = with_mean
+            self.with_extra_doubles = with_extra_doubles
 
-        self.layers = layers
-        self.neuron_start = neuron_start
-        self.neuron_lower = neuron_lower
-        self.neuron_double = neuron_double
-        self.algo = algo
-        self.lr = lr
-        self.loss = loss
-        self.tags = Tags()
-        self.user_db = UserDB()
-        self.aff_db = AffinityDB()
-        self.anime_db = AnimeDB()
-        self.epochs = epochs
-        self.reg = reg
+            self.layers = layers
+            self.neuron_start = neuron_start
+            self.neuron_lower = neuron_lower
+            self.neuron_double = neuron_double
+            self.algo = algo
+            self.lr = lr
+            self.loss = loss
+            self.tags = Tags()
+            self.user_db = UserDB()
+            self.aff_db = AffinityDB()
+            self.anime_db = AnimeDB()
+            self.epochs = epochs
+            self.reg = reg
         try:
             self.data = load_pickled_file(data_path / "general_data.pickle")
         except FileNotFoundError:
@@ -84,31 +79,32 @@ class Model:
         else:
             raise ValueError("Unknown optimization algorithm")
 
-    def _create_model(self, num_features):
-        # model = tf.keras.models.Sequential([
-        #     tf.keras.layers.Dense(self.neuron_start, input_shape=(num_features,)),
-        #     tf.keras.layers.BatchNormalization(),
-        #     tf.keras.layers.PReLU(),
-        #     tf.keras.layers.Dense(512),
-        #     tf.keras.layers.BatchNormalization(),
-        #     tf.keras.layers.PReLU(),
-        #     tf.keras.layers.Dense(512),
-        #     tf.keras.layers.BatchNormalization(),
-        #     tf.keras.layers.PReLU(),
-        #     # tf.keras.layers.Dense(1024),
-        #     # tf.keras.layers.BatchNormalization(),
-        #     # tf.keras.layers.PReLU(),
-        #     # tf.keras.layers.Dense(1024),
-        #     # tf.keras.layers.BatchNormalization(),
-        #     # tf.keras.layers.PReLU(),
-        #     tf.keras.layers.Dense(1)
-        # ])
-
-        model = tf.keras.Sequential([
-            tf.keras.layers.Input(shape=(num_features,)),
-            *self.repeat_layers(),
-            tf.keras.layers.Dense(1)
-        ])
+    def _create_model(self, num_features=1024, standard=False):
+        if standard:
+            model = tf.keras.models.Sequential([
+                tf.keras.layers.Dense(self.neuron_start, input_shape=(num_features,)),
+                tf.keras.layers.BatchNormalization(),
+                tf.keras.layers.PReLU(),
+                tf.keras.layers.Dense(512),
+                tf.keras.layers.BatchNormalization(),
+                tf.keras.layers.PReLU(),
+                tf.keras.layers.Dense(512),
+                tf.keras.layers.BatchNormalization(),
+                tf.keras.layers.PReLU(),
+                # tf.keras.layers.Dense(1024),
+                # tf.keras.layers.BatchNormalization(),
+                # tf.keras.layers.PReLU(),
+                # tf.keras.layers.Dense(1024),
+                # tf.keras.layers.BatchNormalization(),
+                # tf.keras.layers.PReLU(),
+                tf.keras.layers.Dense(1)
+            ])
+        else:
+            model = tf.keras.Sequential([
+                tf.keras.layers.Input(shape=(num_features,)),
+                *self.repeat_layers(),
+                tf.keras.layers.Dense(1)
+            ])
         return model
 
     def train_model_ensemble(self, starting_model_index=1):
@@ -134,7 +130,6 @@ class Model:
     def train(self):
 
         def interleave(files):
-            #  thanks chatgpt very cool
             return files.interleave(lambda file_path: tf.data.Dataset.from_generator(
                 self._generate_batch, args=[file_path], output_signature=(
                     tf.TensorSpec(shape=(self.batch_size, num_features), dtype=tf.float32),
@@ -143,11 +138,9 @@ class Model:
 
         def get_interleaved_training_data():
             file_amount = AffinityDB.count_major_parts()
-            if not self.with_mean:
-                file_paths = [str(aff_db_path / f"{aff_db_filename}-P{_}-N-{model_filename_suffix}.parquet") for _ in
+
+            file_paths = [str(aff_db_path / f"{aff_db_filename}-P{_}-N-{model_filename_suffix}.parquet") for _ in
                               range(file_amount)]
-            else:  # tf is this? remove later, RS doesnt exist anymore
-                file_paths = [str(aff_db_path / f"{aff_db_filename}-P{_}-N-RS.parquet") for _ in range(file_amount)]
 
             files = tf.data.Dataset.list_files(file_paths)
 
@@ -182,7 +175,7 @@ class Model:
         if not self.with_mean:
             # num_features = 98
             # num_features -= 1
-            num_features = 95 # make a dict of type : amount of features
+            num_features = 95  # make a dict of type : amount of features
             if not os.path.exists(aff_db_path / f"{aff_db_filename}-P1-N-{model_filename_suffix}.parquet"):
                 AffinityDB.remove_show_score()
         # if not self.with_extra_doubles:
@@ -232,37 +225,8 @@ class Model:
 
         self.create_deviation_model()
 
-        # deviation_model = self.create_model_skeleton(num_features)
-        # deviation_training_dataset = pd.read_parquet(aff_db_path / "AffinityDB-P1-N.parquet")
-        # # The training dataset for the deviation model will basically be only 1 part of the 20+ used to train
-        # #
-        # user_scores = list(deviation_training_dataset['User Score'])
-        #
-        # # user_shows_df = user_shows_df_with_name.drop('Show Name', axis=1)
-        # # normalized_df = self.aff_db.normalize_aff_df(user_shows_df, for_predict=True)
-        # # normalized_df = normalized_df.fillna(0)
-        # #
-        # # normalized_df = normalized_df.drop('Show Score', axis=1)
-        # normalized_dataset = AffinityDB.filter_df_for_model(deviation_training_dataset)
-        # features = normalized_dataset.iloc[:, :-1].values
-        # predictions = self.model.predict(features)
-        # deviations = user_scores - predictions
-        # X_train, X_test, y_train, y_test = train_test_split(predictions, deviations, test_size=0.1, random_state=42)
-        # deviation_model.fit(
-        #     x=normalized_dataset,
-        #     y=predictions,
-        #     epochs=self.epochs,
-        #     validation_data=(X_test, y_test),
-        #     batch_size=512
-        # )
-        #
-        # model_name = self.model_filename.__str__().split("\\")[-1].split(".")[0] + "-Dev.h5"
-        # # The above line just gets the filename (T1-4-50-RSDD, for example) from the full path which
-        # # is stored in self.model_filename. <--- Rename later
-        # deviation_model.save(models_path / model_name)
-
-    def create_model_skeleton(self, num_features):
-        model = self._create_model(num_features)
+    def create_model_skeleton(self, num_features, standard=False):
+        model = self._create_model(num_features, standard)
         optimizer = self.choose_optimizer()
         model.compile(optimizer=optimizer,
                       loss=self.loss,
@@ -477,53 +441,36 @@ class Model:
 
         def calculate_prediction_adjustment(main_entry_predicted_score, main_entry, max_score_entry, show_predicted_score):
             """
+            Mitigates wrongfully high predictions that result from taking a show's final predicted score
+            as the maximum of all entries.
+
+            A show's predicted score will be lowered if the show meets ALL of the following conditions :
+
+            1 - The predicted score for either the main or the highest scored (on MAL) entries of the show
+            is lower than the MAL scores for these entries (For example if Gintama S1 prediction = 6.3 it meets
+            the condition because the MAL score is 8.9, same if the highest scored Gintama season prediction was 6.3)
+
+            2 - The prediction for the main entry of the show is lower relative to the overall prediction for that
+            show. (For example Gintama S1 prediction = 6.3, Gintama S8 prediction = 9.4)
+
+            3 - The predicted score for the main entry is no more than 1 point above the user's mean score.
+
+            4 - The predicted score for the entire show (max of all entries) is higher than the user's mean.
             The logic behind the function is to lower the predictions of any show whose
             main entry was given a significantly lower rating compared to a later entry
             (which is ignored if we go by the general formula, which is simply to take
             the highest prediction among all entries).
 
-            Example on what's possibly the worst offender - Gintama. Gintama's tags seem
-            to VASTLY differ between the seasons, with the first season having tags like
-            Gag Humor and Surreal Comedy, and the later ones having more action-oriented
-            tags. So on my list, I get a prediction of 6.3 for the original Gintama (which makes
-            sense according to my tastes) and a whopping 9.4 for later seasons.
-
-            To solve the issue, we obviously need to take the main show's prediction into account.
-            This is by no means a perfect solution, but going by the logic that the first season
-            of a show does define it in most cases, there are more merits than demerits to it.
-
-            So in short, we calculate two values :
-
-            :param m1 - The difference between the MAL score of the main entry, and its predicted score.
-            This tells us how compatible the model thinks the main show is with the user.
-            :param m2 - The difference between the maximum predicted score of all the entries of a show,
-            and the main entry's predicted score. A large difference would point to the existence of an entry
-            that deviates strongly in terms of features (or quality) from the main entry. A small one means
-            there's no issue - all the predictions are in the same range.
-            :param m3 - The difference between the user score of the main entry, and its predicted score.
-            Safeguard so that the m1-m2 system does not lower every prediction for people with very
-            low mean scores (will elaborate at the bottom).
-
-            From here,  we have two cases for m1 and m2:
-
-            Case 1 - both m1 and m2 are high negative values. This is exactly the case we want to avoid -
-            there are most likely one or two entries that are significantly different from the main show
-            which are predicted to be well-liked by the user, but those entries aren't the main essence
-            of the show - and since m1 is also high, the main essence of the show will not be liked by the user. So we want the prediction
-            to be pushed down. In my Gintama example, m1 = 6.3 - 8.9 = -2.6, m2 = 6.3 - 9.4 = -3.1.
-
-            Case 2 - m2 is high negative, but m1 isn't (or maybe it's even positive).
-            There still is some discrepancy between individual entries of a show according
-            to the model, but the main entry is well-received by the user - reducing the prediction
-            just because a future entry is even MORE well-received is most likely undesirable in most
-            cases.
-
-            m3 and m4 are just there to avoid cases where a person with a 4.00 mean score gets every prediction
-            lowered because their m1 will always be high, since pretty much every MAL score is much higher
-            than their score (m3) and to avoid lowering already low predictions (lower than the user's mean score).
+            The overall idea is simply that if there is a large discrepancy between the prediction for the
+            main entry of a show (Gintama) and another season/entry that might have different tags
+            (the more serious arcs of Gintama), the final predicted show should take the main entry into account more
+            than those more serious arcs (unlike normally, where if quality and type
 
             This is by no means a perfect system, but it vastly improved the model's original predictions,
             and is much better than taking the average of all entries (due to outliers and things like OVAs).
+
+
+
 
             """
 
@@ -533,7 +480,7 @@ class Model:
             m2 = main_entry_predicted_score - show_predicted_score
             m3 = main_entry_predicted_score - user.mean_of_watched - 1
             m4 = user.mean_of_watched - show_predicted_score
-            return max(min(0, m1), min(0,m2), min(0,m3), min(0, m4))  # We never want to increase the score hence min(0,m1)
+            return max(min(0, m1), min(0, m2), min(0, m3), min(0, m4))  # We never want to increase the score hence min(0,m1)
 
         def process_predictions():
             max_pos_affs_per_entry = {
@@ -541,7 +488,7 @@ class Model:
                                                           + user_shows_df_with_name['Double Max Pos Affinity'][i])
                 for i in range(len(user_shows_df_with_name))}
             predictions_per_show = {}
-            adj_per_show = {}
+            # adj_per_show = {}
             max_pos_affs_per_show = {}
             processed_entries = []
             for entry in user.entry_list:
@@ -549,14 +496,14 @@ class Model:
                 if entry in processed_entries:
                     continue
                 try:
-                    main_show = self.tags.entry_tags_dict[entry]['Main']
+                    main_show = self.tags.entry_tags_dict_nls[entry]['Main']
                     main_score = predictions[main_show]
                     max_score = main_score
                     max_score_entry = entry
                     max_pos_aff = max_pos_affs_per_entry[main_show]
                 except KeyError:
                     continue
-                for entry, length_coeff in self.tags.show_tags_dict[main_show]['Related'].items():
+                for entry, length_coeff in self.tags.show_tags_dict_nls[main_show]['Related'].items():
                     if length_coeff == 1 and entry in user.entry_list and predictions[entry] > max_score:
                         max_score = predictions[entry]
                         max_score_entry = entry
@@ -564,8 +511,8 @@ class Model:
                     processed_entries.append(entry)
                 predictions_per_show[main_show] = max_score + calculate_prediction_adjustment(main_score,
                                                   main_show, max_score_entry, max_score)
-                adj_per_show[main_show] = calculate_prediction_adjustment(main_score,
-                                                   main_show, max_score_entry, max_score)
+                # adj_per_show[main_show] = calculate_prediction_adjustment(main_score,
+                #                                    main_show, max_score_entry, max_score)
 
                 max_pos_affs_per_show[main_show] = round(max_pos_aff, 3)
             return predictions_per_show, max_pos_affs_per_show
@@ -574,7 +521,6 @@ class Model:
         normalized_df = self.aff_db.normalize_aff_df(user_shows_df, for_predict=True)
         normalized_df = normalized_df.fillna(0)
 
-        # normalized_df = normalized_df.drop('Show Score', axis=1)
         normalized_df = AffinityDB.filter_df_for_model(normalized_df)
 
         if shows_to_take != "watched":
@@ -585,61 +531,13 @@ class Model:
         predictions = self.model.predict(features)
         print("Right after predict")
         predictions = [min(10, float(x[0])) for x in predictions]
-        # normalized_predictions = (predictions - np.mean(predictions)) / np.std(predictions)
-        # normalized_df['Predictions'] = normalized_predictions
-        # dev_features = normalized_df.values
-        # dev_model = tf.keras.models.load_model(models_path / (self.model_filename.__str__().split("\\")[-1].split(".")[0] + "-Dev.h5"))
-        # deviations = dev_model.predict(dev_features)
-        # deviations = [x[0] for x in deviations]
 
-        # normalized_dataset = AffinityDB.filter_df_for_model(deviation_training_dataset)
-        # features = normalized_dataset.values
-        # num_features = normalized_dataset.shape[1]
-        # deviation_model = self.create_model_skeleton(num_features + 1)
-        # predictions = self.model.predict(features)
-        # predictions = [x[0] for x in predictions]
-        # deviations = [(prediction - user_score) for prediction, user_score in list(zip(predictions, user_scores))]
-        #
-        # predictions = (predictions - np.mean(predictions)) / np.std(predictions)
-        # normalized_dataset['Predictions'] = predictions
-        # X_train, X_test, y_train, y_test = train_test_split(normalized_dataset, deviations, test_size=0.1,
-        #                                                     random_state=42)
-        # deviation_model.fit(
-        #     x=np.float32(X_train),
-        #     y=np.float32(y_train),
-        #     epochs=self.epochs,
-        #     validation_data=(np.float32(X_test), np.float32(y_test)),
-        #     batch_size=512
-        # )
-        #
-        # model_name = self.model_filename.__str__().split("\\")[-1].split(".")[0] + "-Dev.h5"
-        # # The above line just gets the filename (T1-4-50-RSDD, for example) from the full path which
-        # # is stored in self.model_filename. <--- Rename later
-        # deviation_model.save(models_path / model_name)
         names = user_shows_df_with_name['Show Name'].to_list()
-        # deviations2 = format_predictions(deviations, names)
-        # deviations_sorted = {show: pred for show, pred in sorted(deviations2.items(), reverse=True, key=lambda x: x[1])}
-        # adjusted_predictions = [pred - dev for pred, dev in list(zip(predictions, deviations))]
-        # adjusted_predictions = format_predictions(adjusted_predictions,names)
-        # adjusted_predictions_sorted = {show: pred for show, pred in
-        #                                sorted(adjusted_predictions.items(), reverse=True, key=lambda x: x[1])}
+
         predictions = format_predictions(predictions, names)
-
-        # model_overshoot = {show_name: 0 for show_name in predictions.keys()}
-        #
-        # for show_name, predicted_score in predictions.items():
-        #     actual_score = user_row[show_name]
-        #     model_overshoot[show_name] = predicted_score - actual_score
-
-
-        # rounded_predictions = [round(x[0],1) for x in predictions]
-        #
-        # sorted_predictions_dict = {x[0]: x[1] for x in
-        #                            sorted(list(zip(names, rounded_predictions)), key=lambda x: x[1])}
 
         predictions_per_show, max_pos_affs_per_show = process_predictions()
 
-        # mean_scores_of_new_predictions = data.mean_score_per_show.select(predictions_per_show.keys()).to_numpy().tolist()[0]
         mean_scores_of_predictions = [self.tags.get_max_score_of_show(show, scores=self.data.mean_score_per_show)
                                           for show in predictions_per_show.keys()]
 
@@ -648,10 +546,7 @@ class Model:
         user_watched_entries = {entry: score[0] for entry, score in user_watched_entries.items()}
 
         user_scores_per_show = [self.tags.get_max_score_of_show(show, scores=user_watched_entries)
-                                          for show in predictions_per_show.keys()]
-
-        # years_row = self.anime_db.df.row(self.anime_db.stats['Year'])
-        # seasons_row = self.anime_db.df.row(self.anime_db.stats['Season'])
+                                for show in predictions_per_show.keys()]
 
         years_dict = self.anime_db.years
         seasons_dict = self.anime_db.converted_seasons
@@ -671,8 +566,8 @@ class Model:
             predictions_per_show['Year'] = int(years_dict[show_name])
             predictions_per_show['Season'] = seasons_dict[show_name]
 
-            show_single_tags = [d['name'] for d in self.tags.show_tags_dict[show_name]['Tags']]\
-                                                  + self.tags.show_tags_dict[show_name]['Genres']
+            show_single_tags = [d['name'] for d in self.tags.show_tags_dict_nls[show_name]['Tags']]\
+                                                  + self.tags.show_tags_dict_nls[show_name]['Genres']
             # predictions_per_show['Tags'] = show_single_tags
             new_predictions_list.append(predictions_per_show)
 
@@ -703,20 +598,6 @@ class Model:
             except ZeroDivisionError:
                 errors[i] = 0
         return errors
-
-    # def fetch_deviations(self):
-    #     aff_db = pd.read_parquet(aff_db_path / "AffinityDB-P1-N.parquet")
-    #     user_scores = list(aff_db['User Score'])
-    #
-    #     # user_shows_df = user_shows_df_with_name.drop('Show Name', axis=1)
-    #     # normalized_df = self.aff_db.normalize_aff_df(user_shows_df, for_predict=True)
-    #     # normalized_df = normalized_df.fillna(0)
-    #     #
-    #     # normalized_df = normalized_df.drop('Show Score', axis=1)
-    #     normalized_df = AffinityDB.filter_df_for_model(aff_db)
-    #     features = normalized_df.iloc[:, :-1].values
-    #     predictions = self.model.predict(features)
-    #     deviations = user_scores - predictions
 
     def predict_scores(self, user_name, site="MAL", db_type=1):
 

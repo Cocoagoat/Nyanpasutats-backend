@@ -3,8 +3,6 @@ from main.modules.AnimeListFormatter import ListFormatter
 from main.models import AnimeData
 from django.db.models import Case, When
 
-from main.modules.general_utils import redis_cache_wrapper
-
 
 class AnimeList(ABC):
     """Container class for anime lists, currently supports only MAL and Anilist.
@@ -59,6 +57,9 @@ class AnimeList(ABC):
             _ = self.list
             self.iter_flag = False
         return iter(self.list)
+
+    def values(self):
+        return self.list.values()
 
     def __getitem__(self, key):
         return self.list[key]

@@ -2,14 +2,10 @@ from main.modules.AnimeDB import AnimeDB
 from main.modules.MAL_utils import MALUtils, get_data
 import requests
 from abc import ABC, abstractmethod
-import polars as pl
 from main.modules.Errors import UserDoesNotExistError
 from main.modules.general_utils import list_to_uint8_array, timeit, redis_cache_wrapper, rate_limit
-from dataclasses import dataclass, field
 from main.modules.AnimeList import MALList, AniList
 from django.core.cache import cache
-# from main.modules.AnimeListFormatter import ListFormatter
-# Redis-wrap the fetcher
 
 
 class AnimeListHandler(ABC):
@@ -36,46 +32,22 @@ class AnimeListHandler(ABC):
         """Retrieves the user's anime list from the relevant service."""
         pass
 
-    @abstractmethod
-    def get_user_scores_list(self, db_row=False):
-        """Get user's scores as a simple list :
-        [score_1, score_2, ..., score_n], where score_1
-        corresponds to the user's score for the first entry
-        in AnimeDB and so on.
-
-        db_row is for internal functionality and should not be used."""
-        pass
-
     # @abstractmethod
-    # def _get_all_list_titles(self):
+    # def get_user_scores_list(self, db_row=False):
+    #     """Get user's scores as a simple list :
+    #     [score_1, score_2, ..., score_n], where score_1
+    #     corresponds to the user's score for the first entry
+    #     in AnimeDB and so on.
+    #
+    #     db_row is for internal functionality and should not be used."""
     #     pass
 
-    @staticmethod
-    @abstractmethod
-    def get_title_from_entry(entry):
-        pass
-
-    @staticmethod
-    @abstractmethod
-    def get_score_from_entry(entry):
-        pass
-
-    @staticmethod
-    @abstractmethod
-    def get_list_status_from_entry(entry):
-        pass
-
-    @staticmethod
-    @abstractmethod
-    def get_num_watched_from_entry(entry):
-        pass
-
-    @staticmethod
-    def determine_list_site(anime_list):
-        if type(anime_list) == MALList:
-            return "MAL"
-        else:
-            return "Anilist"
+    # @staticmethod
+    # def determine_list_site(anime_list):
+    #     if type(anime_list) == MALList:
+    #         return "MAL"
+    #     else:
+    #         return "Anilist"
 
     @staticmethod
     def get_concrete_handler(type):
@@ -95,7 +67,6 @@ class AnimeListHandler(ABC):
         show_amount = 0
         score_sum = 0
         for title in self.anime_list:  # anime_list, scores_db
-            # title = anime['node']['title']
             score = self.anime_list[title]['score']
             if score == 0:
                 continue
@@ -128,30 +99,34 @@ class MALListHandler(AnimeListHandler):
             self._anime_list = MALList(self._fetch_user_anime_list())
         return self._anime_list
 
-    @rate_limit(rate_lim=5, cache_key="MAL_rate_limit")
+    # @rate_limit(rate_lim=5, cache_key="MAL_rate_limit")
     def _send_request_for_list(self, url):
+        """This function exists purely to be decorated with @rate_limit, the inner
+        get_data function is more generic and cannot receive this MAL-specific decorator"""
         return get_data(url)
 
     def _fetch_user_anime_list(self):
         # Manual redis caching, decorator won't work since user_name isn't part of the
         # args here
+        #
 
-        cache_key = f"user_list_{self.user_name}_MAL"
-        result = cache.get(cache_key)
-        if result is not None:
-            print(f"Cached result for {self.user_name}'s list found")
-            return result
+        # cache_key = f"user_list_{self.user_name}_MAL"
+        # result = cache.get(cache_key)
+        # if result is not None:
+        #     print(f"Cached result for {self.user_name}'s list found")
+        #     return result
 
         url = f'https://api.myanimelist.net/v2/users/' \
               f'{self.user_name}/animelist?fields=list_status&limit=1000&sort=list_score&nsfw=True'
         response = self._send_request_for_list(url)
         anime_list = response["data"]
+        print(anime_list[0])
 
         # If the user has more than 1000 entries in their list, we will need separate API
         # calls for each thousand.
 
         if len(anime_list) == 1000:
-            scored_shows = MALUtils.count_scored_shows(anime_list)
+            scored_shows = MALUtils.count_scored_shows(MALList(anime_list))
             thousands = 1
             while len(anime_list) == 1000 * thousands and (scored_shows == 1000 * thousands
                                                            or self.full_list):
@@ -166,39 +141,39 @@ class MALListHandler(AnimeListHandler):
                 next_part = response["data"]
                 anime_list = anime_list + next_part
                 thousands += 1
-                scored_shows = MALUtils.count_scored_shows(anime_list)
+                scored_shows = MALUtils.count_scored_shows(MALList(anime_list))
 
-        cache.set(cache_key, anime_list, 60*5)
+        # cache.set(cache_key, anime_list, 60*5)
         return anime_list
 
-    def get_user_scores_list(self, db_row=False):
-        titles = AnimeDB().titles
-
-        anime_indexes = {v: k for (k, v) in enumerate(titles)}
-        new_list = [None] * (len(titles))
-
-        show_amount = 0
-        score_sum = 0
-        for title in self.anime_list:  # anime_list, scores_db
-            # title = anime['node']['title']
-            score = self.anime_list[title]['score']
-            if score == 0:
-                break
-            show_amount += 1
-            if title in titles:
-                new_list[anime_indexes[title]] = score
-            score_sum += score
-
-        if not db_row:
-            return new_list
-        else:
-            try:
-                mean_score = round(score_sum / show_amount, 4)
-            except ZeroDivisionError:
-                mean_score = 0  # Users are filtered (must have >50 scored shows), but
-                # technically a user can remove all his scores between the time they were added to the db and
-                # the time this program runs.
-            return new_list, mean_score, show_amount
+    # def get_user_scores_list(self, db_row=False):
+    #     titles = AnimeDB().titles
+    #
+    #     anime_indexes = {v: k for (k, v) in enumerate(titles)}
+    #     new_list = [None] * (len(titles))
+    #
+    #     show_amount = 0
+    #     score_sum = 0
+    #     for title in self.anime_list:  # anime_list, scores_db
+    #         # title = anime['node']['title']
+    #         score = self.anime_list[title]['score']
+    #         if score == 0:
+    #             break
+    #         show_amount += 1
+    #         if title in titles:
+    #             new_list[anime_indexes[title]] = score
+    #         score_sum += score
+    #
+    #     if not db_row:
+    #         return new_list
+    #     else:
+    #         try:
+    #             mean_score = round(score_sum / show_amount, 4)
+    #         except ZeroDivisionError:
+    #             mean_score = 0  # Users are filtered (must have >50 scored shows), but
+    #             # technically a user can remove all his scores between the time they were added to the db and
+    #             # the time this program runs.
+    #         return new_list, mean_score, show_amount
 
     def _get_all_list_titles(self):
         return [anime['node']['title'] for anime in self.anime_list]
@@ -249,6 +224,7 @@ class AnilistHandler(AnimeListHandler):
             '''
 
     url = 'https://graphql.anilist.co'
+
     def __init__(self, user_name=None, anime_list=[]):
         super().__init__(user_name, anime_list)
 
