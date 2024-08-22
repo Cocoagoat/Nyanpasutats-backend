@@ -91,8 +91,8 @@ def main():
     # anime_db = AnimeDB()
     # anime_db.generate_anime_DB(update=True)
 
-    anime_db = AnimeDB()
-    anime_db.generate_anime_DB(update=True)
+    # anime_db = AnimeDB()
+    # anime_db.generate_anime_DB(update=True)
     # print(5)
     # tags = Tags()
     # test = tags.tags_per_category

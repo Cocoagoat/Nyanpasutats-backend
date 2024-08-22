@@ -1,4 +1,4 @@
-from Teest3 import main
+from Test import main
 import os
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'animisc.settings')
 import django
