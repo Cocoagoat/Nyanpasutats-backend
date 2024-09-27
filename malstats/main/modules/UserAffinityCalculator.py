@@ -1,15 +1,26 @@
-from .User import User
-from .GeneralData import GeneralData
-from .Tags import Tags
+from main.modules.User import User
+from main.modules.GeneralData import GeneralData
+from main.modules.Tags import Tags
+from main.modules.GlobalValues import MINIMUM_SCORE
 import numpy as np
 
 
 class UserAffinityCalculator:
 
-    def __init__(self, user: User, data: GeneralData, tags: Tags):
+    def __init__(self, user: User, data: GeneralData, tags: Tags, mean_scores, use_updated_dbs=False):
         self.user = user
         self.data = data
         self.tags = tags
+        self.mean_scores = mean_scores
+
+        if use_updated_dbs:
+            self.entry_tags_dict = self.tags.entry_tags_dict_nls_updated
+            self.entry_tags_dict2 = self.tags.entry_tags_dict2_updated
+            self.show_tags_dict = self.tags.show_tags_dict_nls_updated
+        else:
+            self.entry_tags_dict = self.tags.entry_tags_dict_nls
+            self.entry_tags_dict2 = self.tags.entry_tags_dict2
+            self.show_tags_dict = self.tags.show_tags_dict_nls
 
     def initialize_user_dicts(self):
         self.user.tag_affinity_dict = {tag_name: 0 for tag_name in self.tags.all_anilist_tags}
@@ -20,24 +31,19 @@ class UserAffinityCalculator:
         self.user.freq_coeff_per_tag = {tag_name: 0 for tag_name in self.tags.all_anilist_tags}
         self.user.tag_counts = {tag_name: 0 for tag_name in self.tags.all_anilist_tags}
 
-    @staticmethod
-    def initialize_user_stats(user, data):
+    def initialize_user_stats(self):
         """Initializes the necessary stats for user's affinities to be calculated."""
-        watched_user_score_list = [score for title, score in user.scores.items() if score]
+        watched_user_score_list = [score for title, score in self.user.scores.items() if score]
         # ^ Simply a list of the user's scores for every show they watched
 
-        watched_titles = [title for title, score in user.scores.items() if score]
-        # watched_MAL_score_dict = self.data.mean_score_per_show.select(watched_titles).to_dict(as_series=False)
-        # watched_MAL_score_dict = data.mean_score_per_show.select(watched_titles).to_dict(as_series=False)
-        watched_MAL_score_list = [data.mean_score_per_show[title] for title in watched_titles]
-        # watched_MAL_score_list = [score[0] for title, score in
-        #                           watched_MAL_score_dict.items() if title != "Rows"]
+        watched_titles = [title for title, score in self.user.scores.items() if score]
+        watched_MAL_score_list = [self.mean_scores[title] for title in watched_titles]
 
-        user.MAL_mean_of_watched = np.mean(watched_MAL_score_list)
-        user.mean_of_watched = np.mean(watched_user_score_list)
-        user.std_of_watched = np.std(watched_user_score_list)
-        user.entry_list = watched_titles
-        return user
+        self.user.MAL_mean_of_watched = np.mean(watched_MAL_score_list)
+        self.user.mean_of_watched = np.mean(watched_user_score_list)
+        self.user.std_of_watched = np.std(watched_user_score_list)
+        self.user.entry_list = watched_titles
+        return self.user
 
     def _calculate_affinities(self, tag):
         try:
@@ -65,7 +71,10 @@ class UserAffinityCalculator:
         def center_tags(tag_type):
             if tag_type == 'Single':
                 tags = self.tags.all_single_tags + self.tags.all_genres + self.tags.all_studios
-                freq_multi = len(tags) / self.user.sum_of_freq_coeffs_st
+                try:
+                    freq_multi = len(tags) / self.user.sum_of_freq_coeffs_st
+                except ZeroDivisionError:
+                    freq_multi = 0
                 mean_of_affs = np.mean([value for key, value in self.user.tag_affinity_dict.items()
                                         if "<" not in key])
                 self.user.mean_of_single_affs = mean_of_affs
@@ -90,11 +99,11 @@ class UserAffinityCalculator:
     def _process_entry_tags(self, related_entry, length_coeff, user_score, MAL_score):
 
         MAL_score_coeff = -0.6 * MAL_score + 5.9
-        related_entry_data = self.tags.entry_tags_dict_nls[related_entry]
+        related_entry_data = self.entry_tags_dict[related_entry]
         for tag in related_entry_data['Tags'] + related_entry_data['DoubleTags']:
             if tag['name'] not in self.tags.all_anilist_tags:
                 continue
-            adjusted_p = tag['percentage'] # fix later
+            adjusted_p = tag['percentage']
             # # On Anilist, every tag a show has is listed with a percentage. This percentage
             # # can be pushed down or up a bit by any registered user, so as a variable it
             # # inevitably introduces human error - a tag with 60% means that not all users agree
@@ -106,12 +115,11 @@ class UserAffinityCalculator:
             self.user.tag_counts[tag['name']] += adjusted_p * length_coeff
             self.user.tag_entry_list[tag['name']].append(related_entry)
 
-            if user_score >= self.user.mean_of_watched:
+            if user_score >= np.ceil(self.user.mean_of_watched):
                 self.user.tag_pos_affinity_dict[tag['name']] += MAL_score_coeff * \
                                                                 self.user.exp_coeffs[round(10 - user_score)] \
                                                                 * adjusted_p * length_coeff
 
-        # for genre in self.tags.entry_tags_dict[related_entry]['Genres']:
         for genre in related_entry_data['Genres']:
             self.user.score_per_tag[genre] += user_score * length_coeff
             self.user.MAL_score_per_tag[genre] += MAL_score * length_coeff
@@ -119,31 +127,44 @@ class UserAffinityCalculator:
             self.user.tag_entry_list[genre].append(related_entry)
             # Genres and studios do not have percentages, so we add 1 as if p=100
 
-            if user_score >= self.user.mean_of_watched:
+            if user_score >= np.ceil(self.user.mean_of_watched):
                 self.user.tag_pos_affinity_dict[genre] += MAL_score_coeff * \
                                                           self.user.exp_coeffs[round(10 - user_score)] \
                                                           * length_coeff
 
-        show_studio = self.tags.entry_tags_dict_nls[related_entry]['Studio']
+        show_studio = self.entry_tags_dict[related_entry]['Studio']
         if show_studio in self.tags.all_anilist_tags:
             self.user.score_per_tag[show_studio] += user_score * length_coeff
             self.user.MAL_score_per_tag[show_studio] += MAL_score * length_coeff
             self.user.tag_counts[show_studio] += length_coeff
             self.user.tag_entry_list[show_studio].append(related_entry)
 
-            if user_score >= self.user.mean_of_watched:
+            if user_score >= np.ceil(self.user.mean_of_watched):
                 self.user.tag_pos_affinity_dict[show_studio] += MAL_score_coeff * \
                                                                 self.user.exp_coeffs[round(10 - user_score)] \
                                                                 * length_coeff
 
     def get_user_affs(self):
 
+        def no_relevant_watched_shows():
+            """An extremely rare case where the user got past the UserDB filtering
+            but none of their watched shows are relevant (score too low/too few people watched/hentai etc).
+            Only possible if the user's list is full of hentai or they somehow
+            only watch very low-scored shows."""
+            for title in self.user.entry_list:
+                if title in self.entry_tags_dict.keys():
+                    return False
+            return True
+
         processed_entries = []
         self.user.entry_list = []
         self.user.show_count = 0
 
         self.initialize_user_dicts()
-        self.user = self.initialize_user_stats(self.user, self.data)
+        self.initialize_user_stats()
+
+        if no_relevant_watched_shows():
+            return
 
         try:
             x = int(np.ceil(self.user.mean_of_watched))
@@ -155,19 +176,16 @@ class UserAffinityCalculator:
         self.user.exp_coeffs = [1 / 2 ** (10 - exp) * self.user.score_diffs[10 - exp]
                                 for exp in range(10, x - 1, -1)]
 
-        # self.user.scores['Monster'] = 10
         for entry in self.user.entry_list:
             user_score = self.user.scores[entry]
-            # if user_score and entry == "Monster":
-            #     user_score = 10
             if not user_score or entry in processed_entries:
                 continue
 
             try:
-                main_show = self.tags.entry_tags_dict_nls[entry]['Main']
+                main_show = self.entry_tags_dict[entry]['Main']
             except KeyError:
                 continue
-            main_show_data = self.tags.show_tags_dict_nls[main_show]
+            main_show_data = self.show_tags_dict[main_show]
             user_watched_entries_length_coeffs = [x[1] for x in
                                                   main_show_data['Related'].items()
                                                   if self.user.scores[x[0]]]
@@ -182,9 +200,8 @@ class UserAffinityCalculator:
 
                 length_coeff = length_coeff / sum_of_length_coeffs
 
-                MAL_score = self.data.mean_score_per_show[related_entry]
-                if MAL_score < 6.5:
-                    print("Warning - MAL score lower than 6.5")
+                MAL_score = self.mean_scores[related_entry]
+                if MAL_score < MINIMUM_SCORE:
                     continue
 
                 self.user.show_count += length_coeff
@@ -199,11 +216,10 @@ class UserAffinityCalculator:
 
         return self.user
 
-    def recalc_affinities_2(self, entry):
+    def recalc_affinities_2(self, show_to_exclude):
 
-        main_show = entry
         sum_of_length_coeffs = sum([length_coeff for related_entry, length_coeff
-                                    in self.tags.show_tags_dict_nls[main_show]['Related'].items()
+                                    in self.show_tags_dict[show_to_exclude]['Related'].items()
                                     if self.user.scores[related_entry]])
 
         if not sum_of_length_coeffs:
@@ -219,12 +235,13 @@ class UserAffinityCalculator:
         pos_aff_per_entry = {}
         show_tag_names = set()
 
-        for entry, length_coeff in self.tags.show_tags_dict_nls[main_show]['Related'].items():
+        for entry, length_coeff in self.show_tags_dict[show_to_exclude]['Related'].items():
             length_coeff /= sum_of_length_coeffs
             entry_user_score = self.user.scores[entry]
             if not entry_user_score:
                 continue
-            entry_MAL_score = self.data.mean_score_per_show[entry]
+
+            entry_MAL_score = self.mean_scores[entry]
 
             new_mean_of_watched = (new_mean_of_watched * new_user_show_count) - entry_user_score * length_coeff
             new_MAL_mean = (new_MAL_mean * new_user_show_count) - entry_MAL_score * length_coeff
@@ -235,16 +252,16 @@ class UserAffinityCalculator:
             new_MAL_mean /= new_user_show_count
 
             entry_MAL_coeff = self.MAL_score_coeff(entry_MAL_score)
-            # Turn the data thingy into a dict so no .item()
+
             try:
                 entry_exp_coeff = self.user.exp_coeffs[round(10 - entry_user_score)]
             except IndexError:
                 entry_exp_coeff = 0
 
             pos_aff_per_entry[entry] = entry_MAL_coeff * entry_exp_coeff * length_coeff
-            entry_tags_dict = self.tags.entry_tags_dict2[entry]
+            entry_tags = self.entry_tags_dict2[entry]
 
-            for tag, tag_p in entry_tags_dict.items():
+            for tag, tag_p in entry_tags.items():
 
                 try:
                     tag_p = tag_p['percentage']
@@ -261,7 +278,7 @@ class UserAffinityCalculator:
                         # Not going to bother handling it properly, since the requirement to be in the database
                         # is 50 scored shows - for exactly 49 of them to be irrelevant (too obscure) is nigh impossible.
                         # The one person out of the millions tested who triggered this was someone who watches almost
-                        # exclusively hentai, and their one relevant scored show was Keijo!!!!!!!!. Why man, just why.
+                        # exclusively hentai, and their one relevant scored show was Keijo!!!!!!!!.
 
                     new_freq_coeffs[tag] = min(1, max(new_user_tag_count[tag] / 10, tag_overall_ratio * 20))
                 except KeyError:
@@ -294,7 +311,7 @@ class UserAffinityCalculator:
 
             for entry in pos_aff_per_entry.keys():
                 try:
-                    pos_aff_per_entry_for_tag[entry] *= self.tags.entry_tags_dict2[entry][tag]['percentage']
+                    pos_aff_per_entry_for_tag[entry] *= self.entry_tags_dict2[entry][tag]['percentage']
                 except KeyError:
                     pos_aff_per_entry_for_tag[entry] = 0
             show_pos_aff = sum(pos_aff_per_entry_for_tag.values())
