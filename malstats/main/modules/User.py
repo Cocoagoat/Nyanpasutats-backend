@@ -23,14 +23,14 @@ class User:
     MAL_score_per_tag: dict = field(default=None)
     positive_aff_per_tag: dict = field(default=None)
     freq_coeff_per_tag: dict = field(default=None)
-    tag_entry_list : dict = field(default=None)
+    tag_entry_list: dict = field(default=None)
     tag_counts: dict = field(default=None)
 
     sum_of_freq_coeffs_st: int = field(default=0)
     sum_of_freq_coeffs_dt: int = field(default=0)
 
-    freq_multi_st : int = field(default=0)
-    freq_multi_dt : int = field(default=0)
+    freq_multi_st: int = field(default=0)
+    freq_multi_dt: int = field(default=0)
 
     entry_list: list = field(default=None)
     show_count: int = field(default=None)
