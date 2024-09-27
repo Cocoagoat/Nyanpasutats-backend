@@ -7,6 +7,7 @@ import numpy as np
 import requests
 import time
 import pickle
+import logging
 import pandas as pd
 from enum import Enum
 from functools import wraps
@@ -28,6 +29,8 @@ from polars.exceptions import ColumnNotFoundError
 from main.modules.filenames import *
 from django.conf import settings
 from main.modules.Errors import UserListPrivateError, UserDoesNotExistError, UserListFetchError
+
+logger = logging.getLogger("nyanpasutats")
 
 
 class ErrorCauses(Enum):
@@ -138,7 +141,6 @@ def sort_dict_by_values(d, reverse=True):
 
 
 def load_pickled_file(filename):
-    test = __name__
     with open(filename, 'rb') as f:
         try:
             pickled_file = pickle.load(f)
@@ -182,27 +184,35 @@ def parse_xml(xml_file):
 
 
 def get_data(url, site=None):
+    new_headers_fetched = False
     for retry_count in range(100):
         try:
             time.sleep(1.2)
             headers = get_headers()
             response = requests.get(url, headers=headers, timeout=15)
-            print(response)
+            # logger.info(response)
             if response.status_code == HTTPStatus.OK:
                 try:
                     return response.json()
                 except JSONDecodeError:
                     return response
             elif response.status_code == HTTPStatus.UNAUTHORIZED.value:
-                headers = fetch_new_headers()
-                continue
+                if not new_headers_fetched:
+                    headers = fetch_new_headers()
+                    new_headers_fetched = True
+                    continue
+                else:
+                    logger.critical(f"Response for url {url} was {response.status_code}, and acquisition of"
+                                    f"new headers failed to remedy the problem.")
+                    raise UserListFetchError
             elif response.status_code == HTTPStatus.FORBIDDEN.value:
+                logger.error(f"Response for url {url} was {response.status_code}, resource is private")
                 raise UserListPrivateError
             elif (response.status_code == HTTPStatus.NOT_FOUND.value
             ) or response.status_code == HTTPStatus.METHOD_NOT_ALLOWED.value:
                 raise UserDoesNotExistError
             else:
-                print(response.status_code)
+                logger.error(f"Response for url {url} was {response.status_code}, cause is unknown")
                 continue
         except (SSLError, ConnectionError, requests.exceptions.ReadTimeout,
                 requests.exceptions.ConnectionError, http.client.RemoteDisconnected,
@@ -214,9 +224,11 @@ def get_data(url, site=None):
                 time.sleep(Sleep.LONG_SLEEP)
             else:
                 time.sleep(Sleep.LONG_SLEEP * 6)
-            print("Error, retrying connection")
+            print("Unable to connect, retrying")
+            logger.warning("Unable to connect, retrying")
             continue
 
+    logger.critical("FATAL ERROR - Unable to connect to server for an extended period of time.")
     raise ConnectionRefusedError("FATAL ERROR - Unable to connect to server for an extended period of time.")
 
 
@@ -292,7 +304,7 @@ def concat_to_existing_dict(dict1_filename,dict2,concat_type):
             except KeyError:
                 continue
     else:
-        print("No such concatenation type")
+        logger.error(f"Bad concatenation type {concat_type} when trying to concatenate to {dict1_filename}")
         raise ValueError
 
     save_pickled_file(dict1_filename, dict1)
@@ -302,7 +314,8 @@ def remove_zero_columns(df : pl.DataFrame):
     zero_columns = [col for col in df.columns if df[col].sum() == 0]
     for col in zero_columns:
         if col.endswith("Affinity"):
-            # If say, "Crime Affinity" is full of zeros, we want to remove it and the "Crime" column.
+            # If say, "Crime Affinity" is full of zeros,
+            # we want to remove it and the "Crime" column.
             try:
                 df.drop_in_place(col)
                 df.drop_in_place(" ".join(col.split()[:-1]))
@@ -322,7 +335,6 @@ def shuffle_df(df: pd.DataFrame):
 
 def handle_nans(df):
     if df.isna().any().any():
-        # print("Warning, NaNs detected")
         has_nans_per_column = df.isna().any()
         for col in df.columns:
             if has_nans_per_column[col]:
@@ -361,8 +373,23 @@ def convert_keys_to_camel_case(data):
         # Recursively apply to elements in lists
         return [convert_keys_to_camel_case(item) for item in data]
     else:
-        # Base case: when data is neither a dict nor a list, just return the data itself
+        # Base case: when data is neither a dict nor a list,
+        # just return the data itself
         return data
+
+
+def add_suffix_to_filename(full_filename: Path, suffix: str) -> Path:
+    """Adds a suffix of the type "-SUFFIX" to a filename.
+    Example: suffix = U, filename = AnimeDB.parquet, output = AnimeDB-U.parquet"""
+
+    if not isinstance(full_filename, Path):
+        raise TypeError("full_filename must be a pathlib.Path object")
+
+    file_stem = full_filename.stem
+    file_ext = full_filename.suffix
+
+    new_filename = f"{file_stem}-{suffix}{file_ext}"
+    return full_filename.with_name(new_filename)
 
 
 def is_redis_cache():
@@ -377,20 +404,16 @@ def redis_cache_wrapper(timeout):
     def decorator(function):
         @wraps(function)
         def wrapped(*args, **kwargs):
-            print("Entering cache decorator")
-            print(*args, **kwargs)
             cache_key = f"{function.__name__}_{'_'.join(str(arg) for arg in args)}_{'_'.join(f'{key}_{value}' for key, value in kwargs.items())}"
-            print("Cache key is", cache_key)
+
             result = cache.get(cache_key)
             if result is not None:
                 return result
-            print("Entering function")
+
             result = function(*args, **kwargs)
-            print(type(result))
             if not (isinstance(result, dict) and 'error' in result):
-                print("No error found, caching the result")
                 cache.set(cache_key, result, timeout)
-                print("5")
+
             return result
         return wrapped
     return decorator
@@ -401,17 +424,18 @@ def rate_limit(rate_lim=1, cache_key=None):
         @wraps(function)
         def wrapped(*args, **kwargs):
             print("Entering rate limiter")
-            # nonlocal cache_key
-            # if not cache_key:
-            #     if "site" in kwargs.keys():
-            #         cache_key = f"{kwargs['site']}_rate_limit"
-            #     else:
-            #         raise ValueError("If the decorator doesn't have a cache_key,"
-            #                          "the wrapped function must provide a site")
+            nonlocal cache_key
+            if not cache_key:
+                if "site" in kwargs.keys():
+                    cache_key = f"{kwargs['site']}_rate_limit"
+                else:
+                    raise ValueError("If the decorator doesn't have a cache_key,"
+                                     "the wrapped function must provide a site")
 
             print("Cache key is", cache_key)
-            while not can_make_api_call(rate_lim, cache_key):
-                print("Sleeping to avoid rate limit")
+            first_time = True
+            while not can_make_api_call(rate_lim, cache_key, first_time):
+                first_time = False
                 time.sleep(0.1)
             print("Entering function")
             print(args, kwargs)
@@ -421,14 +445,16 @@ def rate_limit(rate_lim=1, cache_key=None):
     return decorator
 
 
-def can_make_api_call(rate_lim, cache_key):
+def can_make_api_call(rate_lim, cache_key, first_time):
 
     current_time = int(time.time())
-    last_api_call_time = cache.get(cache_key)
+    last_api_call_time = cache.get(cache_key, 0)
 
     if last_api_call_time is None or (current_time - int(last_api_call_time)) >= rate_lim:
         # Update the last API call time and proceed
         cache.set(cache_key, current_time)
+        if not first_time:
+            logger.info(f"Waiting for rate limit. {rate_lim - (current_time - last_api_call_time)} seconds left.")
         return True
     else:
         # Wait if we're within the rate limit window
@@ -455,4 +481,32 @@ def convert_to_timestamp(date_str, time_str):
     combined_datetime = date_obj.replace(hour=time_obj.hour, minute=time_obj.minute, second=0, microsecond=0)
 
     return combined_datetime.timestamp()
+
+
+def determine_queue_cache_key(source_name, source_type="task"):
+    """Determines the cache key used to keep track of the request queue of each task/view.
+     (tasks_in_queue_seasonal for the seasonal task, etc)"""
+    if source_name.endswith('seasonal_stats_task') or 'seasonal' in source_name and source_type == "view":
+        queue_cache_key = 'tasks_in_queue_seasonal'
+    elif source_name.endswith('recs_task') or 'recs' in source_name and source_type == "view":
+        queue_cache_key = 'tasks_in_queue_recs'
+    elif source_name.endswith('affs_task') or 'affs' in source_name and source_type == "view":
+        queue_cache_key = 'tasks_in_queue_affs'
+    else:
+        raise ValueError(f"Unknown task/view {source_name}. "
+                         f"Make sure the names of the tasks have not been changed without"
+                         "applying these changes here.")
+    return queue_cache_key
+
+
+def basic_try_except(func):
+    def inner(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"An unexpected error has occurred during the daily update. {str(e)}")
+            return None
+    return inner
+
+
 

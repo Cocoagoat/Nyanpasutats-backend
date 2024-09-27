@@ -3,6 +3,8 @@ import sys
 from main.modules.filenames import data_path
 # Client_details.txt must contain your MAL client ID on the first line,
 # and your MAL client secret on the second line.
+
+
 try:
     with open(data_path / "Client_details.txt") as f:
         id_secret = f.readlines()

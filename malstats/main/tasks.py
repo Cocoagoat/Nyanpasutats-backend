@@ -1,5 +1,4 @@
 from .modules.Model import Model, UserScoresPredictor
-from .models import AnimeDataUpdated
 from django.core.cache import cache
 import shutil
 from .modules.Tags import Tags
@@ -41,10 +40,6 @@ class MainTask(Task):
     def after_return(self, status, retval, task_id, args, kwargs, einfo):
         """ This method runs after the task finishes regardless of its state. """
         super().after_return(status, retval, task_id, args, kwargs, einfo)
-
-        # if status == "FAILURE":
-        #     logger.error(f"Task {task_id} with args {args}, {kwargs} failed to execute. Error info : {einfo}")
-
         try:
             cache.decr(self.queue_cache_key)
         except ValueError:

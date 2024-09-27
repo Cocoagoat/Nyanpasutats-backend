@@ -1,6 +1,5 @@
 from __future__ import print_function
 
-# from main.modules.AnimeList import AnimeList
 from main.modules.general_utils import get_data, Sleep, convert_to_timestamp
 from bs4 import BeautifulSoup
 import datetime
@@ -9,6 +8,7 @@ from enum import Enum
 import django
 django.setup()
 from main.models import AnimeData
+from functools import lru_cache
 try:
     import thread
 except ImportError:
@@ -34,7 +34,13 @@ class MALUtils:
 
     status_convert_dict = {'COMPLETED': 'completed', 'DROPPED': 'dropped',
                    'CURRENT': 'watching', 'PAUSED': 'on_hold',
-                   'PLANNING': 'plan_to_watch', 'REPEATING': 'completed'}  # No MAL equivalent for repeating
+                   'PLANNING': 'plan_to_watch', 'REPEATING': 'completed'}
+    # No MAL equivalent for repeating
+
+    @staticmethod
+    def get_current_season():
+        date = datetime.date.today()
+        return {'Year': date.year, 'Season': Seasons((date.month-1)//3 + 1)}
 
     @staticmethod
     def get_anime_title_by_id(mal_id):
@@ -78,7 +84,8 @@ class MALUtils:
             page_html = get_data(url)
             if not page_html:
                 return datetime.datetime.now(datetime.timezone.utc)
-                # Something wrong with the page html, very rare, easier to just skip the user than handle it
+                # Something wrong with the page html,
+                # very rare, easier to just skip the user than handle it
 
         soup = BeautifulSoup(page_html.text, "html.parser")
         date_str = soup.findAll("span", {"class": "user-status-data di-ib fl-r"})[
@@ -101,7 +108,6 @@ class MALUtils:
             page_users_table = []
             url = f"{base_url}show={str(75 * page_num)}"
             print(f"Getting usernames from {url}")
-            # logger.debug(f"Getting usernames from {url}")
             page_html = get_data(url)
             time.sleep(1)
             try:
@@ -115,7 +121,6 @@ class MALUtils:
                     # flag being 1 means we got an error twice in a row,
                     # most likely an issue with too many requests
                     print("Too many requests, commencing sleep then trying again")
-                    # logger.debug("Too many requests, commencing sleep then trying again")
                     time.sleep(Sleep.LONG_SLEEP)
                 else:
                     base_url = f"{base_url}m=all&"
@@ -155,7 +160,6 @@ class MALUtils:
 
     @staticmethod
     def MAL_user_time_string_to_timestamp(str):
-        # seconds_to_substract = None
         if "ago" in str:
             seconds_to_substract, units, _ = str.split(" ")
             seconds_to_substract = int(seconds_to_substract)
@@ -173,7 +177,6 @@ class MALUtils:
                     hour=0, minute=0, second=0, microsecond=0) - datetime.timedelta(hours=10)
                 if user_date == "Yesterday":
                     date_timestamp = date_timestamp - datetime.timedelta(days=1)
-                # date_obj = datetime.datetime.fromtimestamp(date_timestamp.timestamp())
 
                 # Format the datetime object to a string in the desired format
                 user_date = date_timestamp.strftime("%b %d")
@@ -193,10 +196,6 @@ class MALUtils:
         url = "https://myanimelist.net/anime/55102/Girls_Band_Cry/stats?m=all&"
         users_table = MALUtils.get_usernames_from_show(url, pages_to_get=100)
         for (i, table_row) in enumerate(users_table):
-            # user_link = table_row.findNext(
-            #     "div", {"class": "di-tc va-m al pl4"}).findNext("a")
-            # user_name = str(user_link.string)
-
             td_elements = table_row.find_all("td", {"class": "borderClass ac"})
             if len(td_elements) >= 3:
                 user_list_status = str(td_elements[1].string)
@@ -205,8 +204,6 @@ class MALUtils:
                 if user_list_status == "Plan to Watch" and (start_timestamp <= user_timestamp
                                                             ) and user_timestamp <= end_timestamp:
                     ptw_count += 1
-
-
 
         return ptw_count
 

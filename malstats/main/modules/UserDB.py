@@ -11,7 +11,7 @@ from main.modules.filenames import *
 from main.modules.MAL_utils import MALUtils
 from main.modules.AnimeDB import AnimeDB
 from main.modules.GlobalValues import cpu_share
-from main.modules.Errors import UserListPrivateError, UserListFetchError
+from main.modules.Errors import UserListFetchError
 from main.modules.AnimeListHandler import AnimeListHandler, MALListHandler
 import polars as pl
 import pickle
@@ -266,14 +266,18 @@ class UserDB:
         """Used during the creation of the main database. Saves all relevant files
         (main database, user list, blacklist and scores dictionary) every N created
         entries as defined in fill_main_database."""
-        self._df.write_parquet(user_database_name)
+
         usernames = list(self._df['Username'])
+        print(len(usernames), self._user_amount)
         print(f"Saving MAL user list. Length is {len(usernames)}")
+        self._df.write_parquet(user_database_name)
         save_list_to_csv(usernames, MAL_users_filename)
         print(f"Saving blacklist. Length is {len(self._blacklist)}")
         save_list_to_csv(self._blacklist, blacklist_users_filename)
         print(f"Saving scores dictionary")
+
         self.save_scores_dict()
+
         if len(usernames) == self._user_amount:
             print("Splitting scores dictionary")
             self.split_scores_dict()
@@ -289,6 +293,10 @@ class UserDB:
             """Takes a single user's list and creates a row for them in the main database
             if user meets criteria (>50 scored shows, >30 days account_age, non-troll mean score).
             returns True if user was added, False otherwise."""
+
+            def remove_last_user_scores():
+                for v in scores_db_dict.values():
+                    v[user_index] = None
 
             current_time = datetime.datetime.now(datetime.timezone.utc)
             account_age_threshold = datetime.timedelta(days=30)
@@ -306,6 +314,10 @@ class UserDB:
                     if score == 0:
                         actual_user_index = user_index + initial_users + saved_so_far
                         print(f'Finished processing {show_amount} shows of user {username} ({actual_user_index})')
+                        if show_amount < 50:
+                            print(f"{username} had less than 50 relevant scored entries, proceeding to next user")
+                            remove_last_user_scores()
+                            return False
                         break
 
                     else:
@@ -316,11 +328,13 @@ class UserDB:
                                 account_age_verified = True
                         # We test whether the account is at least one month old by seeing if at least one
                         # anime update was done more than a month ago.
-                        show_amount += 1
+                        # show_amount += 1
 
                         if title in self.anime_db.titles:
                             scores_db_dict[title][user_index] = score
-                        score_sum += score
+                            show_amount += 1
+                            score_sum += score
+                        # score_sum += score
 
                 mean_score = round(score_sum / show_amount, 4)
 
@@ -331,6 +345,7 @@ class UserDB:
                         account_age = MALUtils.check_account_age_directly(username)
                         if account_age < account_age_threshold:
                             print(f"{username}'s account is {account_age} old, likely a troll")
+                            remove_last_user_scores()
                             return False
                         print(f"{username}'s account is {account_age} old, user verified. Adding to database")
                     scores_db_dict['Index'][user_index] = current_users
@@ -343,6 +358,7 @@ class UserDB:
                     return True
                 else:
                     print(f"{username} has no meaningful scores, proceeding to next user")
+                    remove_last_user_scores()
                     return False
             print(f"{username} has less than 50 scored shows, proceeding to next user")
             return False
@@ -350,7 +366,6 @@ class UserDB:
         def save_data():
 
             print(f"Saving database. Currently on {current_users} entries")
-            # logger.debug(f"Saving database. Currently on {current_users} entries")
 
             # First we create a df from the temporary dictionary. Then we concatenate
             # it with the existing database.
@@ -376,8 +391,8 @@ class UserDB:
 
         save_data_per = 100
         saved_so_far = 0
-        min_scored_amount = 75000
-        max_scored_amount = 500000
+        min_scored_amount = 20000
+        max_scored_amount = 60000
 
         # We want to take usernames from shows that are not TOO popular, but also not too niche.
         # The reason for this is that the update table of a niche show will include many troll accounts
@@ -478,17 +493,18 @@ class UserDB:
                     return
 
     def get_user_db_entry(self, user_name, site="MAL"):
-        titles = [x for x in self.columns if x not in self.stats]
+        titles = AnimeDB(anime_database_updated_name).titles
         ListHandler = AnimeListHandler.get_concrete_handler(site)
         list_handler = ListHandler(user_name)
-        user_scores_list, mean_score, show_amount = list_handler.get_user_scores_list(db_row=True)
+        user_scores_list, mean_score, show_amount = list_handler.get_user_scores_list(db_row=True, for_predict=True)
+
         index = 0   # Index doesn't really matter, just needs to be there for the structure
         new_list = [index, user_name, mean_score, show_amount] + user_scores_list
 
         schema_dict = {'Index': pl.Int64, 'Username': pl.Utf8, 'Mean Score': pl.Float32, 'Scored Shows': pl.UInt32} | \
                       {x: y for (x, y) in zip(titles, [pl.UInt8] * len(titles))}
 
-        new_dict = {k: v for k, v in zip(self.columns, new_list)}
+        new_dict = {k: v for k, v in zip(self.stats + titles, new_list)}
 
         new_row = pl.DataFrame(new_dict, schema=schema_dict)
 

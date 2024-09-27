@@ -6,7 +6,9 @@ import sys
 
 def main():
     """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'animisc.settings')
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'animisc.dev_settings')
+    # Should be defined in virtual environment's activate script as well,
+    # if there's a settings-related bug make sure that it's there
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
