@@ -1,17 +1,24 @@
 import datetime
+import logging
 import shutil
+
+from django.db import transaction
 from polars import ColumnNotFoundError
 from main.modules.filenames import *
 from main.modules.MAL_utils import Seasons, MediaTypes, MALUtils
+from main.modules.general_utils import add_suffix_to_filename
+from main.modules.GlobalValues import MINIMUM_SCORE
 import django
 import os
 import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'animisc.settings')
+# os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'animisc.settings')
 django.setup()
 from main.models import AnimeData, AnimeDataUpdated
+
+logger = logging.getLogger('nyanpasutats')
 
 
 class AnimeDB:
@@ -58,32 +65,33 @@ class AnimeDB:
     # │ on   ┆            ┆            ┆           ┆   ┆          ┆            ┆            ┆            │
     # └──────┴────────────┴────────────┴───────────┴───┴──────────┴────────────┴────────────┴────────────┘
 
-    _instance = None
+    _instances = {}
     # noinspection DuplicatedCode
 
-    def __new__(cls, *args, **kwargs):
-        """The class is a Singleton - we only need one instance of it since its purpose is
-        to house and create on demand all the data structures that are used in this project."""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls, *args, **kwargs)
-            cls._instance._df = None
-            cls._instance._titles = None
-            cls._instance._partial_df = None
-            cls._instance._df_metadata = None
-            cls._instance._ids = None
-            cls._instance._mean_scores = None
-            cls._instance._scored_amounts = None
-            cls._instance._members = None
-            cls._instance._episodes = None
-            cls._instance._durations = None
-            cls._instance._media_types = None
-            cls._instance._seasons = None
-            cls._instance._years = None
-        return cls._instance
+    def __new__(cls, filename=None, *args, **kwargs):
+        """The class is a Multiton, currently used for two different databases - the original
+        one created at the start of every data gathering cycle (AnimeDB.parquet),
+        and all of its subsequent updates (AnimeDB-U.parquet, updated daily)"""
+        if filename not in cls._instances:
+            instance = super().__new__(cls)
+            cls._instances[filename] = instance
 
-    def __init__(self):
-        # All properties are loaded on demand
-        pass
+            instance._filename = anime_database_name if not filename else filename
+            instance._df = None
+            instance._sql_db = AnimeData if not filename else AnimeDataUpdated
+            instance._titles = None
+            instance._partial_df = None
+            instance._df_metadata = None
+            instance._ids = None
+            instance._mean_scores = None
+            instance._scored_amounts = None
+            instance._members = None
+            instance._episodes = None
+            instance._durations = None
+            instance._media_types = None
+            instance._seasons = None
+            instance._years = None
+        return cls._instances[filename]
 
     stats = {'ID': 0, 'Mean Score': 1, 'Scores': 2, 'Members': 3, 'Episodes': 4,
              'Duration': 5, 'Type': 6, 'Year': 7, 'Season': 8}
@@ -93,47 +101,62 @@ class AnimeDB:
         if not isinstance(self._df, pl.DataFrame):
             try:
                 print("Loading anime database")
-                self._df = pl.read_parquet(anime_database_name)
+                self._df = pl.read_parquet(self._filename)
                 print("Anime database loaded successfully")
             except FileNotFoundError:
                 print("Anime database not found. Creating new anime database")
-                self.generate_anime_DB()
-                self._df = pl.read_parquet(anime_database_name)
+                if "-P" in self._filename.name:
+                    self.create_partial_df()
+                else:
+                    self.generate_anime_DB()
+                self._df = pl.read_parquet(self._filename)
         return self._df
 
     @property
     def df_metadata(self):
         if not self._df_metadata:
             try:
-                self._df_metadata = pq.ParquetFile(anime_database_name)
+                self._df_metadata = pq.ParquetFile(self._filename)
             except FileNotFoundError:
                 self.generate_anime_DB()
-                self._df_metadata = pq.ParquetFile(anime_database_name)
+                self._df_metadata = pq.ParquetFile(self._filename)
         return self._df_metadata
 
     @property
     def titles(self):  # change this into a normal var?
-        """A list of all the anime titles."""
         if not self._titles:
             columns = [field.name for field in self.df_metadata.schema]
             self._titles = columns[1:]
         return self._titles
 
-    @property
-    def partial_df(self):
-        if not isinstance(self._partial_df, pl.DataFrame):
-            df_dict = self.df.to_dict(as_series=False)
-            titles = [title for title, show_stats in df_dict.items()
-                      if (title != 'Rows' and
-                      self.show_meets_conditions(show_stats))]
-            self._partial_df = self.df.select(["Rows"] + titles)
-        return self._partial_df
-
-    def filter_titles(self, meets_conditions_func):
-        df_dict = self.df.to_dict(as_series=False)
+    def create_partial_df(self):
+        full_db = AnimeDB(anime_database_updated_name if "-U" in self._filename.name else anime_database_name)
+        df_dict = full_db.df.to_dict(as_series=False)
         titles = [title for title, show_stats in df_dict.items()
                   if (title != 'Rows' and
-                      meets_conditions_func(show_stats))]
+                  self.show_meets_standard_conditions_nls(show_stats))]
+        partial_filename = add_suffix_to_filename(self._filename, "P")
+        self._partial_df = full_db.df.select(["Rows"] + titles)
+        self._partial_df.write_parquet(partial_filename)
+
+    @property
+    def partial_df(self):
+        if not self._partial_df:
+            partial_filename = add_suffix_to_filename(self.filename, "P")
+            try:
+                self._partial_df = pl.read_parquet(partial_filename)
+            except FileNotFoundError:
+                self._partial_df = self.create_partial_df()
+                self._partial_df.write_parquet(partial_filename)
+        return self._partial_df
+
+    def filter_titles(self, meets_conditions_func, title_list=None):
+        df_dict = self.df.to_dict(as_series=False)
+        titles = [title for title, show_stats in df_dict.items()
+                  if title != 'Rows'
+                  and (not title_list or title in title_list)
+                  and meets_conditions_func(show_stats)
+                  ]
         return titles
 
     def sort_titles_by_release_date(self, titles):
@@ -153,7 +176,7 @@ class AnimeDB:
     def ids(self):
         if not self._ids:
             ids_row = self.df.row(self.stats['ID'])
-            self._ids = {title: ID for (title,ID)
+            self._ids = {title: ID for (title, ID)
                          in list(zip(self.titles, ids_row[1:]))}
         return self._ids
 
@@ -170,7 +193,7 @@ class AnimeDB:
         if not self._scored_amounts:
             scored_amounts_row = self.df.row(self.stats['Scores'])
             self._scored_amounts = {title: scored_amount for (title, scored_amount)
-                                    in list(zip(self.titles, scored_amounts_row)[1:])}
+                                    in list(zip(self.titles, scored_amounts_row[1:]))}
         return self._scored_amounts
 
     @property
@@ -223,14 +246,27 @@ class AnimeDB:
             self._years = {title: year for (title, year) in list(zip(self.titles, years_row[1:]))}
         return self._years
 
-    def show_meets_conditions(self, show_stats: dict):
-        if int(show_stats[self.stats["Scores"]]) >= 2000 \
-                and show_stats[self.stats["Duration"]] * \
-                show_stats[self.stats["Episodes"]] >= 15\
-                and show_stats[self.stats["Duration"]] >= 2\
-                and show_stats[self.stats["Mean Score"]] >= 6.5:
+    @classmethod
+    def show_meets_standard_conditions(cls, show_stats: dict):
+        if int(show_stats[cls.stats["Scores"]]) >= 2000 \
+                and show_stats[cls.stats["Duration"]] * \
+                show_stats[cls.stats["Episodes"]] >= 15\
+                and show_stats[cls.stats["Duration"]] >= 3:
                 # and show_stats[self.stats["Year"]]>=2021 \
                 # and show_stats[self.stats["Year"]]<=2022:
+                # Remember to change condition_func inside
+                # initialize_graph_collection as well until
+                # refactoring
+            return True
+        return False
+
+    @classmethod
+    def show_meets_standard_conditions_nls(cls, show_stats: dict):
+        if int(show_stats[cls.stats["Scores"]]) >= 2000 \
+                and show_stats[cls.stats["Duration"]] * \
+                show_stats[cls.stats["Episodes"]] >= 15 \
+                and show_stats[cls.stats["Duration"]] >= 3 \
+                and show_stats[cls.stats["Mean Score"]] >= MINIMUM_SCORE:
             return True
         return False
 
@@ -249,6 +285,7 @@ class AnimeDB:
             show_dict = {}
             for stat in relevant_stats:
                 try:
+                    # print("Filename before error is", self._filename)
                     show_dict[stat] = self.df.filter(pl.col('Rows') == stat)[show].item()
                 except ColumnNotFoundError:
                     break
@@ -293,7 +330,11 @@ class AnimeDB:
                 media_type_index = MediaTypes[anime['node']["media_type"]].value
             except KeyError:
                 media_type_index = None
+
             anime_data.append(media_type_index)
+
+            title = anime["node"]["title"]
+            anime_data_dict[title] = anime_data
 
             try:
                 year = int(anime["node"]["start_season"]["year"])
@@ -305,41 +346,28 @@ class AnimeDB:
                 except KeyError:
                     year, season = None, None
             anime_data.append(year)
-            anime_data.append(season)
 
-            title = anime["node"]["title"]
-            anime_data_dict[title] = anime_data
+            correct_seasons = {'Sousou no Frieren': 4}
+            # Stupid API has Frieren as a summer anime,
+            # it'll probably have more mistakes in that vein
+            if title in correct_seasons.keys():
+                anime_data.append(correct_seasons[title])
+            else:
+                anime_data.append(season)
 
-            try:
-                image_url = anime['node']['main_picture']['medium']
-            except KeyError:
-                image_url = ""
+            image_url = anime['node'].get('main_picture', {}).get('medium', "")
 
             anime_data_for_db = anime_data + [title, image_url]
             db_fields = ['mal_id', 'mean_score', 'scores', 'members', 'episodes', 'duration', 'type', 'year', 'season',
                          'name', 'image_url']
-            anime_db_dict = dict(zip(db_fields, anime_data_for_db))
 
-            mal_id = anime_db_dict.pop('mal_id')
-            AnimeSQLDB.objects.update_or_create(
-                mal_id=mal_id,
-                defaults=anime_db_dict
-            )
-            return title  # Title is returned to check whether we reached the last show
-
-        if update:
-            AnimeSQLDB = AnimeDataUpdated
-            filename = anime_database_updated_name
-        else:
-            AnimeSQLDB = AnimeData
-            filename = anime_database_name
+            return dict(zip(db_fields, anime_data_for_db))
 
         last_show_reached = False
         last_show = 'Tenkuu Danzai'
         # Lowest rated show, it'll be the last one in the sorted list.
-        # Hardcoded because I'm 100% sure nothing will ever be rated
-        # lower than THAT in my lifetime. The order is a bit off using Jikan
-        # so checking for N/A score and stopping is not an option.
+        # Hardcoded because it's extremely unlikely to be dethroned from its
+        # lowest rated show ever title.
 
         url_required_fields = ["id", "mean", "num_scoring_users", "num_list_users", "num_episodes",
                                "average_episode_duration",
@@ -351,6 +379,8 @@ class AnimeDB:
         stat_names = list(self.stats.keys())
         anime_data_dict = {'Rows': stat_names}
 
+        anime_entries = []
+
         page_num = 0
         while not last_show_reached:
             # We loop over pages of anime info that we get from the Jikan API (the info is
@@ -360,20 +390,42 @@ class AnimeDB:
             anime_batch = MALUtils.get_anime_batch_from_MAL(page_num, url_required_fields)
             try:
                 print(f"Currently on score {anime_batch['data'][-1]['node']['mean']}")
+                logger.info(f"Currently on score {anime_batch['data'][-1]['node']['mean']}")
             except KeyError:
-                print("Finished")
+                print("Finished gathering data. Saving anime database")
+                logger.info("Finished gathering data. Saving anime database")
 
             for anime in anime_batch["data"]:
                 if not non_sequels_only:
-                    title = create_anime_DB_entry(anime)
+                    anime_entry = create_anime_DB_entry(anime)
+                    anime_entries.append(anime_entry)
+                    title = anime_entry['name']
                 if title.startswith(last_show):
                     last_show_reached = True
                     break
             page_num += 1
+
         table = pa.Table.from_pydict(anime_data_dict)
-        pq.write_table(table, filename)  # This creates a .parquet file from the dict
-        if filename == anime_database_name:
+        if os.path.exists(anime_database_updated_name):
+            # If this isn't the first update, we save the previous update as well,
+            # since we'll need it for updating graphs, tags etc
+            shutil.copy(anime_database_updated_name, anime_database_prev_updated_name)
+        pq.write_table(table, self._filename)  # This creates a .parquet file from the dict
+
+        if self._filename == anime_database_name:
+            # When we create the db for the first time, updated is the same as original
+            # and prev_updated is same as updated
             shutil.copy(anime_database_name, anime_database_updated_name)
+            shutil.copy(anime_database_updated_name, anime_database_prev_updated_name)
+        logger.info("Anime database successfully created")
+
+        # Update the SQL database
+        with transaction.atomic():
+            for entry in anime_entries:
+                self._sql_db.objects.update_or_create(
+                    mal_id=entry['mal_id'],
+                    defaults=entry
+                )
 
     def are_separate_shows(self, show1: str, show2: str, relation_type: str):
         """ This method tries to determine whether two entries that are related in some way on MAL
@@ -413,8 +465,6 @@ class AnimeDB:
 
         if show1 not in self.titles or show2 not in self.titles:  # take care of this outside later
             return False
-
-        # Put these into the 3rd case^
         if relation_type in ['sequel', 'prequel', 'summary']:
             # Sequels, prequels, alternative versions and summaries are never separate shows
             return False
@@ -449,3 +499,13 @@ class AnimeDB:
             return False
 
         return False
+
+    @staticmethod
+    def get_post_update_changed_titles():
+        current_updated_db = pl.read_parquet(anime_database_updated_name)
+        previous_updated_db = pl.read_parquet(anime_database_prev_updated_name)
+        new_titles = list(set(current_updated_db.columns) - set(previous_updated_db.columns))
+        changed_titles = list(set(previous_updated_db.columns) - set(current_updated_db.columns))
+        logger.info(f"Updated AnimeDB. \n New titles : {new_titles} \n Changed/Removed titles : {changed_titles}")
+        return new_titles, changed_titles
+
