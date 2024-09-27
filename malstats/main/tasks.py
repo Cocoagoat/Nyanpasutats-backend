@@ -1,132 +1,111 @@
-import time
-
-from .modules.Model2 import Model, UserScoresPredictor
-from pathlib import Path
+from .modules.Model import Model, UserScoresPredictor
+from .models import AnimeDataUpdated
 from django.core.cache import cache
-from .modules.filenames import main_model_path
+import shutil
+from .modules.Tags import Tags
 import tensorflow as tf
-from .modules.SeasonalStats2 import SeasonalStats2
-from .modules.filenames import current_model_name
+from .modules.SeasonalStats import SeasonalStats
+from .modules.AnimeDB import AnimeDB
+from .modules.filenames import *
 from celery import shared_task, Task
-from animisc.celery import app
-from .modules.general_utils import redis_cache_wrapper
-from .modules.SeasonalStats import SeasonalStats  # Assuming the logic resides here
+from .modules.general_utils import redis_cache_wrapper, determine_queue_cache_key, add_suffix_to_filename
 from .modules.Errors import UserListFetchError
 from .modules.AffinityFinder import find_max_affinity
-from .models import TaskQueue
-from django.core.management import call_command
+from .modules.Model import add_image_urls_to_predictions
+from celery.exceptions import TimeLimitExceeded
+from django.db.utils import OperationalError
 import logging
-
-logger = logging.getLogger(__name__)
-
+import time
+import traceback
 
 current_dir = Path(__file__).parent
 model = None
 user_db = None
-CACHE_TIMEOUT = 3600
-# tf.config.set_visible_devices([], 'GPU')
+CACHE_TIMEOUT = 3600*3
+tf.config.set_visible_devices([], 'GPU')
 
-view_logger = logging.getLogger('Nyanpasutats.view')
-
-
-# def delete_task(task_id):
-#     task = TaskQueue.objects.get(task_id=task_id)
-#     task.delete()
+logger = logging.getLogger('nyanpasutats')
+aff_logger = logging.getLogger('nyanpasutats.affinity_logger')
+recs_logger = logging.getLogger('nyanpasutats.recs_logger')
+seasonal_logger = logging.getLogger('nyanpasutats.seasonal_logger')
 
 
-class MyTask(Task):
+class MainTask(Task):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.execution_count = 0  # for future use
+        self.queue_cache_key = determine_queue_cache_key(self.name, "task")
+        # separate caches for each queue (affinity, recs, seasonal)
+
     def after_return(self, status, retval, task_id, args, kwargs, einfo):
         """ This method runs after the task finishes regardless of its state. """
         super().after_return(status, retval, task_id, args, kwargs, einfo)
-        if status == "SUCCESS":
-            print("Task success")
-        elif status == "FAILURE":
-            print("Task failed")
 
-        # Decrement the counter in Redis
-        print("Before decrementing", cache.get('tasks_in_queue'))
-
-        cache_info = cache.client.get_client().connection_pool.connection_kwargs
-        print("Cache configuration (after_return):", cache_info)
+        # if status == "FAILURE":
+        #     logger.error(f"Task {task_id} with args {args}, {kwargs} failed to execute. Error info : {einfo}")
 
         try:
-            cache.decr('tasks_in_queue')
-            print("Inside try")
+            cache.decr(self.queue_cache_key)
         except ValueError:
-            print("Error - key tasks_in_queue not found in cache")
+            cache.set(self.queue_cache_key, 1, timeout=3600)
 
-        print("After decrementing", cache.get('tasks_in_queue'))
-        time.sleep(0.03)
+    def on_failure(self, exc, task_id, args, kwargs, einfo):
+        logger.error(f"Task {task_id} with args {args}, {kwargs} failed to execute. Error info : {exc}")
 
-    def before_start(self, task_id, args, kwargs):
+    def apply_async(self, args=None, kwargs=None, task_id=None, producer=None,
+                    link=None, link_error=None, **options):
+        time.sleep(0.5)  # Sleep a bit before starting task for queue to properly catch up
+
         try:
-            cache.incr('tasks_in_queue')
-            cache.incr('tasks_in_queue')
+            cache.incr(self.queue_cache_key)
         except ValueError:
-            cache.set('tasks_in_queue', 2)
-        print("Key after incrementing", cache.get('tasks_in_queue'))
-        return super().before_start(task_id, args, kwargs)
+            cache.set(self.queue_cache_key, 2, timeout=3600)
 
-    # def apply_async(self, args=None, kwargs=None, **options):
-    #     """ Increment the counter in Redis before running the task. """
-    #     try:
-    #         cache.incr('tasks_in_queue')
-    #     except ValueError:
-    #         cache.set('tasks_in_queue', 1)
-    #     return super().apply_async(args, kwargs, **options)
+        return super().apply_async(args=args, kwargs=kwargs, task_id=task_id,
+                                   producer=producer, link=link, link_error=link_error,
+                                   **options)
 
 
-
-# def on_task_success(result, *args, **kwargs):
-#     def on_task_success(result, *args, **kwargs):
-#         print("Task success")
-#         print(result, *args, **kwargs)
-#
-#
-# def on_task_failure(result, *args, **kwargs):
-#     print("Task failed")
-#     print(result, *args, **kwargs)
-
-@shared_task(base=MyTask)
+@shared_task(base=MainTask, autoretry_for=(OperationalError,), max_retries=10)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
 def get_user_seasonal_stats_task(username, site="MAL"):
-    print("Entering seasonal task")
+    seasonal_logger.info(f"Entering seasonal task for {site} user {username}")
     try:
-        stats = SeasonalStats2(username, site).full_stats.to_dict()
-        no_seq_stats = SeasonalStats2(username, site, no_sequels=True).full_stats.to_dict()
-
-        # seasonal_dict, seasonal_dict_no_sequels = SeasonalStats.get_user_seasonal_stats(username)
+        stats = SeasonalStats(username, site).full_stats.to_dict()
+        no_seq_stats = SeasonalStats(username, site, no_sequels=True).full_stats.to_dict()
         result = {'Stats': stats, 'StatsNoSequels': no_seq_stats}
-        # cache.set(cache_key, result, CACHE_TIMEOUT)
-        # cache.set("test", "1", CACHE_TIMEOUT)
-        # print("Cache is supposed to be set at this point")
+        seasonal_logger.info(f"Successfully fetched seasonal stats for {site} user {username}")
         return result
     except UserListFetchError as e:
-        # cache.set(cache_key, result, 60) # test this
         return {'error': e.message, 'status': e.status}
+
     except Exception as e:
-        logging.error(f"An unexpected error has occurred. {e}")
+        seasonal_logger.error(f"An unexpected error has occurred while fetching seasonal stats. {str(e)}")
         return {'error': "An unexpected error has occurred on our side. Please try again later.", 'status': 500}
 
 
-@shared_task(base=MyTask)
+@shared_task(base=MainTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
 def get_user_recs_task(username, site="MAL"):
-    print("Entering recommendations task")
+    recs_logger.info(f"Entering recommendations task for {site} user {username}")
     global model
     if not model:
-        print("Initializing model")
+        recs_logger.info("Initializing model")
         model = Model(tf.keras.models.load_model(
             main_model_path.parent / "Main_prediction_model.h5"))
-        # test = username
 
-    scores_predictor = UserScoresPredictor(user_name=username,
-                                           model=model, site=site,
-                                           shows_to_take="all")
     try:
+        scores_predictor = UserScoresPredictor(user_name=username,
+                                               model=model, site=site,
+                                               shows_to_take="all")
         predictions, predictions_sorted_by_diff, fav_tags, least_fav_tags = scores_predictor.predict_scores()
-        print("After returning from predict_scores")
-        # predictions = predictions.astype(float)
+        predictions = add_image_urls_to_predictions(predictions)
+        predictions_sorted_by_diff = add_image_urls_to_predictions(predictions_sorted_by_diff)
+        print(f"Predictions look like {predictions[0]}")
+        recs_logger.info(f"Predictions look like {predictions[0]}")
+        recs_logger.info(f"Successfully fetched predictions for {site} user {username}")
+
         return {'Recommendations': predictions,
                 'RecommendationsSortedByDiff': predictions_sorted_by_diff,
                 'FavTags': fav_tags,
@@ -134,28 +113,59 @@ def get_user_recs_task(username, site="MAL"):
     except UserListFetchError as e:
         return {'error': e.message, 'status': e.status}
     except Exception as e:
-        logging.error(f"An unexpected error has occurred. {e}")
+        recs_logger.error(f"An unexpected error has occurred while fetching recommendations. {str(e)}")
         return {'error': "An unexpected error has occurred on our side. Please try again later.", 'status': 500}
 
 
-@shared_task(base=MyTask)
+@shared_task(base=MainTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
 def get_user_affs_task(username, site="MAL"):
-    print("Entering affinities task")
+    aff_logger.info(f"Entering affinities task for {site} user {username}")
     try:
         pos_affinities, neg_affinities = find_max_affinity(username, site)
-        print("After returning from find_max_affinities")
+        aff_logger.info(f"Successfully fetched affinities for {site} user {username}")
         return {'PosAffs': pos_affinities, 'NegAffs': neg_affinities}
     except UserListFetchError as e:
         return {'error': e.message, 'status': e.status}
     except Exception as e:
-        logging.error(f"An unexpected error has occurred. {e}")
+        aff_logger.error(f"An unexpected error has occurred while fetching affinities. {str(e)}")
         return {'error': "An unexpected error has occurred on our side. Please try again later.", 'status': 500}
 
 
 @shared_task
-def delete_expired_username_cache():
+def update_anime_db():
     try:
-        call_command('delete_expired_username_cache')
+        AnimeDB().generate_anime_DB(update=True)
     except Exception as e:
-        logger.error(f"Error running delete_expired_username_cache task: {str(e)}")
+        logger.error(f"An unexpected error has occurred while updating the anime database. {str(e)}")
+
+
+@shared_task(bind=True, autoretry_for=(TimeLimitExceeded,), retry_kwargs={'max_retries': 10, 'countdown': 60},
+             soft_time_limit=6600, default_retry_delay=60, time_limit=7200, name='main.tasks.daily_update')
+def daily_update(self):
+    try:
+        daily_backup()
+        AnimeDB(anime_database_updated_name).generate_anime_DB(update=True)
+        Tags().update_tags()
+    except Exception as e:
+        full_stack_trace = traceback.format_exc()  # Capture the full traceback as a string
+        logger.error(f"An unexpected error has occurred during the daily update. {str(e)}")
+        logger.error(full_stack_trace)
+        self.retry()
+
+
+def daily_backup():
+    filenames_to_backup = [entry_tags_updated_filename,
+                           entry_tags_nls_updated_filename, shows_tags_updated_filename,
+                           shows_tags_nls_updated_filename, graphs_dict_updated_filename,
+                           graphs_dict_nls_updated_filename]
+
+    # We actually use AnimeDB's "prev" for updating the rest of the objects, so in case the update of
+    # AnimeDB goes wrong we don't want to lose the "prev". The rest of the prevs are just for backup in
+    # case something goes wrong during updating one of them.
+    shutil.copy(anime_database_updated_name, add_suffix_to_filename(anime_database_updated_name, "prev_before_update"))
+    for filename in filenames_to_backup:
+        try:
+            shutil.copy(filename, add_suffix_to_filename(filename, "prev"))
+        except FileNotFoundError:
+            continue  # First time updating, -U files haven't been created yet
