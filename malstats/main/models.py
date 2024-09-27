@@ -49,41 +49,6 @@ class AnimeDataUpdated(models.Model):
     objects = RetryManager()
 
 
-class TaskQueue(models.Model):
-    task_id = models.CharField(max_length=50, unique=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    status = models.CharField(max_length=20, default='pending')
-
-    class Meta:
-        ordering = ['created_at']
-
-    def __str__(self):
-        return self.task_id
-
-    objects = RetryManager()
-
-    def delete(self, retries=50, delay=1, *args, **kwargs):
-        for attempt in range(retries):
-            try:
-                return super(TaskQueue, self).delete(*args, **kwargs)
-            except OperationalError:
-                view_logger.error("Caught Operational Error during delete")
-                if attempt + 1 == retries:
-                    raise
-                time.sleep(delay)
-
-
-class UsernameCache(models.Model):
-    username = models.CharField(max_length=30, unique=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    expires_at = models.DateTimeField(null=True, blank=True)
-
-    def save(self, *args, **kwargs):
-        if not self.expires_at:
-            self.expires_at = datetime.now() + timedelta(hours=2)  # Example TTL of 2 hours
-        super(UsernameCache, self).save(*args, **kwargs)
-
-    objects = RetryManager()
 
 
 
