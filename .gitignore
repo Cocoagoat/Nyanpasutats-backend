@@ -1,0 +1,25 @@
+# Ignore all files
+*
+
+# But don't ignore directories, so we can recurse into them
+!*/
+
+
+# Don't ignore Python, Cython or HTML files
+!*.py
+!*.pyx
+!*.html
+!*.h5
+!.gitignore
+!requirements.txt
+!malstats/main/data/NSFWTags.txt
+malstats/main/modules/unused.py
+malstats/main/modules/Teest3.py
+malstats/main/modules/Teest5.py
+#malstats/animisc/settings.py
+
+# Ignore the virtual environment
+MALenv39/
+MALenv39linux/
+venv/
+ext/
