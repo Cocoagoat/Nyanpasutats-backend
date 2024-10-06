@@ -83,6 +83,7 @@ class AnimeDB:
             instance._partial_df = None
             instance._df_metadata = None
             instance._ids = None
+            instance._id_title_map = None
             instance._mean_scores = None
             instance._scored_amounts = None
             instance._members = None
@@ -154,7 +155,7 @@ class AnimeDB:
         df_dict = self.df.to_dict(as_series=False)
         titles = [title for title, show_stats in df_dict.items()
                   if title != 'Rows'
-                  and (not title_list or title in title_list)
+                  and (title_list is None or title in title_list)
                   and meets_conditions_func(show_stats)
                   ]
         return titles
@@ -179,6 +180,12 @@ class AnimeDB:
             self._ids = {title: ID for (title, ID)
                          in list(zip(self.titles, ids_row[1:]))}
         return self._ids
+
+    @property
+    def id_title_map(self):
+        if not self._id_title_map:
+            self._id_title_map = {ID: title for (title, ID) in self.ids.items()}
+        return self._id_title_map
 
     @property
     def mean_scores(self):
@@ -247,8 +254,16 @@ class AnimeDB:
         return self._years
 
     @classmethod
+    def show_is_from_current_season(cls, show_stats: dict):
+        if show_stats[cls.stats["Season"]] == MALUtils.get_current_season()['Season'].value\
+                and show_stats[cls.stats["Year"]] == datetime.datetime.now().year:
+            return True
+        return False
+
+    @classmethod
     def show_meets_standard_conditions(cls, show_stats: dict):
-        if int(show_stats[cls.stats["Scores"]]) >= 2000 \
+        if (int((show_stats[cls.stats["Scores"]])) >= 2000
+                or cls.show_is_from_current_season(show_stats))  \
                 and show_stats[cls.stats["Duration"]] * \
                 show_stats[cls.stats["Episodes"]] >= 15\
                 and show_stats[cls.stats["Duration"]] >= 3:
@@ -262,7 +277,8 @@ class AnimeDB:
 
     @classmethod
     def show_meets_standard_conditions_nls(cls, show_stats: dict):
-        if int(show_stats[cls.stats["Scores"]]) >= 2000 \
+        if (int(show_stats[cls.stats["Scores"]]) >= 2000
+                or cls.show_is_from_current_season(show_stats)) \
                 and show_stats[cls.stats["Duration"]] * \
                 show_stats[cls.stats["Episodes"]] >= 15 \
                 and show_stats[cls.stats["Duration"]] >= 3 \
@@ -501,11 +517,31 @@ class AnimeDB:
         return False
 
     @staticmethod
-    def get_post_update_changed_titles():
+    def get_post_update_changed_titles(update_from_scratch=False):
         current_updated_db = pl.read_parquet(anime_database_updated_name)
-        previous_updated_db = pl.read_parquet(anime_database_prev_updated_name)
+
+        previous_updated_db = pl.read_parquet(anime_database_prev_updated_name
+                                              if not update_from_scratch else anime_database_name)
+        print(f"Length of updated filename : {len(current_updated_db.columns)}")
+        print(update_from_scratch)
+        print(f"Length of updated filename : {len(previous_updated_db.columns)}")
         new_titles = list(set(current_updated_db.columns) - set(previous_updated_db.columns))
         changed_titles = list(set(previous_updated_db.columns) - set(current_updated_db.columns))
         logger.info(f"Updated AnimeDB. \n New titles : {new_titles} \n Changed/Removed titles : {changed_titles}")
         return new_titles, changed_titles
+
+    # def get_title_by_id(self, malId):
+    #     try:
+    #         index = self.anime_db.ids.index(malId)
+    #     except ValueError:
+    #         return
+    #
+    #     try:
+    #         MAL_title = self.anime_db.titles[index]
+    #         return MAL_title
+    #     except IndexError:
+    #         return
+
+
+
 

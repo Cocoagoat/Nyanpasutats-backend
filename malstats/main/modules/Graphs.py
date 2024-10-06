@@ -1,3 +1,5 @@
+import os
+
 from colorama import Fore
 from main.modules.AnimeDB import AnimeDB
 from main.modules.general_utils import save_pickled_file, load_pickled_file, get_data
@@ -306,12 +308,17 @@ class GraphCollection():
 
 class GraphCreator():
 
-    def __init__(self, titles, update=True, titles_to_remove=[]):
+    def __init__(self, titles, update=False, update_from_scratch=False, titles_to_remove=[]):
         try:
             if not update:
                 self._graph_collection = load_pickled_file(temp_graphs_dict_filename)
             else:
-                self._graph_collection = load_pickled_file(graphs_dict_filename)
+                if os.path.exists(graphs_dict_updated_filename) and not update_from_scratch:
+                    # print("Went into the correct if, initial graphs are the updated ones")
+                    self._graph_collection = load_pickled_file(graphs_dict_updated_filename)
+                else:
+                    self._graph_collection = load_pickled_file(graphs_dict_filename)
+
                 if titles_to_remove:
                     self._graph_collection.remove_entries(titles_to_remove, update=update)
 
@@ -324,7 +331,10 @@ class GraphCreator():
             self.processed_anime = []
 
         self.anime_db = AnimeDB(filename=None if not update else anime_database_updated_name)
+        # print(f"Titles in GraphCreator : {titles}")
+        # print(f"Length of updated df inside GraphCreator : {len(self.anime_db.df.columns)}")
         self.relevant_titles = self.anime_db.sort_titles_by_release_date(titles)
+        # print(f"Relevant titles in GraphCreator : {self.relevant_titles}")
 
         self.update = update
         self.saved_for_update = False
@@ -428,7 +438,8 @@ class GraphCreator():
     def create_graphs(self, filename=None):
 
         relevant_ids = [self.anime_db.get_id_by_title(title) for title in self.relevant_titles]
-
+        # print(f"Relevant titles in create_graphs : {self.relevant_titles}")
+        # print(f"Relevant ids in create_graphs : {relevant_ids}")
         for title, ID in list(zip(self.relevant_titles, relevant_ids)):
             if title in self.processed_anime:  # or MAL_title not in relevant_titles:
                 continue
@@ -505,7 +516,8 @@ class Graphs:
             print("Anime graphs dictionary not found. Creating new anime graphs dictionary")
 
             def condition_func(show_stats: dict):
-                if int(show_stats[AnimeDB.stats["Scores"]]) >= 2000 \
+                if (int(show_stats[AnimeDB.stats["Scores"]]) >= 2000
+                    or AnimeDB.show_is_from_current_season(show_stats)) \
                         and show_stats[AnimeDB.stats["Duration"]] * \
                         show_stats[AnimeDB.stats["Episodes"]] >= 15 \
                         and show_stats[AnimeDB.stats["Duration"]] >= 3 \
@@ -521,8 +533,10 @@ class Graphs:
                 self._all_graphs = graph_creator.create_graphs()
 
     @staticmethod
-    def update_graphs(titles_to_add, titles_to_remove):
-        graph_creator = GraphCreator(titles_to_add, update=True, titles_to_remove=titles_to_remove)
+    def update_graphs(titles_to_add, titles_to_remove, update_from_scratch=False):
+        graph_creator = GraphCreator(titles_to_add, update=True,
+                                     update_from_scratch=update_from_scratch,
+                                     titles_to_remove=titles_to_remove)
         graph_creator.create_graphs()
 
     @property

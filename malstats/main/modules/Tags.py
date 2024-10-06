@@ -505,7 +505,7 @@ class Tags:
                     ok_response_received = True  # last page
         return show_list, has_next_page
 
-    def _get_recommended_shows(self, entry, ids):
+    def _get_recommended_shows(self, entry):
         try:
             sorted_recs = sorted(entry['recommendations']['nodes'], key=lambda x: x['rating'], reverse=True)
         except KeyError:
@@ -515,29 +515,45 @@ class Tags:
         rec_dict = {}
         for rec in sorted_recs[0:rec_list_length]:
             try:
-                rec_index = ids.index(rec['mediaRecommendation']['idMal'])
-            except (TypeError, ValueError):
+                rec_MAL_title = self.anime_db.id_title_map[rec['mediaRecommendation']['idMal']]
+            except KeyError:
                 continue
-            try:
-                rec_MAL_title = self.anime_db.titles[rec_index]
-            except IndexError:
-                continue
+
+            # try:
+            #     rec_index = self.anime_db.ids.index(rec['mediaRecommendation']['idMal'])
+            # except (TypeError, ValueError):
+            #     continue
+            # try:
+            #     rec_MAL_title = self.anime_db.titles[rec_index]
+            # except IndexError:
+            #     continue
             # Can't take title directly from the recommendation object,
             # might be different from the MAL title we have in the database
             rec_dict[rec_MAL_title] = rec['rating']
         return rec_dict
 
-    def _get_entry_data(self, entry, ids, update=False):
-        title = self._get_entry_title(entry, ids)
-        show_recommendations = self._get_recommended_shows(entry, ids)
+    def _get_entry_data(self, title, update=False):
+
+        malId = self.anime_db.get_id_by_title(title)
+        variables = {"idMal": malId}
+        logger.info(f"Fetching entry {title} with malId {malId}")
+        entry = requests.post(self.url,
+                              json={"query": self.entry_query,
+                                    "variables": variables},
+                              timeout=30).json()
+        time.sleep(1)
+        entry = entry['data']['Media']
+
+        # title = self._get_entry_title(entry, ids)
+        show_recommendations = self._get_recommended_shows(entry)
 
         graphs_dict = self.graphs.all_graphs if not update else self.graphs.all_graphs_updated
         try:
             main_entry, _ = graphs_dict.find_related_entries(title)
         except TypeError:
             print(f"Error finding related entry in graphs for entry {title}.")
-            logger.info(f"Error finding related entry in graphs for entry {title}.")
-            return
+            logger.error(f"Error finding related entry in graphs for entry {title}.")
+            main_entry = title
 
         entry_data = {
             "Tags": [{"name": tag["name"], "percentage": self.adjust_tag_percentage(tag["rank"]),
@@ -551,16 +567,16 @@ class Tags:
         }
         return entry_data
 
-    def _get_entry_title(self, entry, ids):
-        try:
-            index = ids.index(entry["idMal"])
-        except (TypeError, ValueError):
-            return
-        title = self.anime_db.titles[index]
-        return title
+    # def _get_entry_title(self, entry):
+    #     try:
+    #         return self.anime_db.id_title_map[entry["idMal"]]
+    #     except KeyError:
+    #         return
+    #     # title = self.anime_db.titles[index]
+    #     # return title
 
     def _add_single_tags_to_entry_tags_dict(self, update=False):
-        ids = self.anime_db.df.row(self.anime_db.stats['ID'])[1:]
+        # ids = self.anime_db.df.row(self.anime_db.stats['ID'])[1:]
         has_next_page = True
         page_num = 1 if not update else 350
         entry_tags_dict = self._entry_tags_dict if not update else self._entry_tags_dict_updated
@@ -571,10 +587,11 @@ class Tags:
             entry_list, has_next_page = self._get_shows_from_page(page_num)
             for entry in entry_list:
                 try:
-                    title = self._get_entry_title(entry, ids)
+                    # title = self._get_entry_title(entry)
+                    title = self.anime_db.id_title_map[entry["idMal"]]
                     if title in relevant_shows:
                         entry_data = self._get_entry_data(entry)
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, KeyError):
                     continue
                 entry_tags_dict[title] = entry_data
             page_num += 1
@@ -696,7 +713,7 @@ class Tags:
         anime_db = AnimeDB(anime_database_updated_name if update else None)
         for i, entry in enumerate(entry_tags_dict.keys()):
 
-            if i % 100 == 0:
+            if i % 500 == 0:
                 print(f"Currently on show {i} of {show_amount}")
 
             if entry in processed_titles:
@@ -839,18 +856,22 @@ class Tags:
         formatted_string = input_string.replace('<', ' ').replace('>', ' ').strip()
         return formatted_string
 
-    def update_tags(self):
+    def update_tags(self, update_from_scratch=False):
 
-        titles_to_add, titles_to_remove = AnimeDB.get_post_update_changed_titles()
+        titles_to_add, titles_to_remove = AnimeDB.get_post_update_changed_titles(
+            update_from_scratch=update_from_scratch)
         self.anime_db = AnimeDB(anime_database_updated_name)
-        ids = self.anime_db.df.row(self.anime_db.stats['ID'])[1:]
+        # ids = self.anime_db.df.row(self.anime_db.stats['ID'])[1:]
+        # print(f"Length of updated df inside Tags : {len(self.anime_db.df.columns)}")
+        # print(f"Titles before filtering inside Tags: {titles_to_add}")
         titles_to_add = self.anime_db.filter_titles(AnimeDB.show_meets_standard_conditions,
                                                     titles_to_add)
+        # print(f"Titles after filtering inside Tags: {titles_to_add}")
         print("Beginning graphs update")
-        self.graphs.update_graphs(titles_to_add, titles_to_remove)
+        self.graphs.update_graphs(titles_to_add, titles_to_remove, update_from_scratch)
         print("Finished graphs update")
 
-        if os.path.exists(entry_tags_updated_filename):
+        if os.path.exists(entry_tags_updated_filename) and not update_from_scratch:
             entry_tags_dict = self.entry_tags_dict_updated
         else:
             entry_tags_dict = self.entry_tags_dict
@@ -859,16 +880,36 @@ class Tags:
         print("Adding single tags")
         for title in titles_to_add:
             try:
-                malId = self.anime_db.get_id_by_title(title)
-                variables = {"idMal": malId}
-                entry = requests.post(self.url,
-                                        json={"query": self.entry_query,
-                                        "variables": variables},
-                                        timeout=30).json()
-                time.sleep(1)
-                entry_data = self._get_entry_data(entry['data']['Media'], ids, update=True)
+                # malId = self.anime_db.get_id_by_title(title)
+                # variables = {"idMal": malId}
+                # logger.info(f"Fetching entry {title} with malId {malId}")
+                # entry = requests.post(self.url,
+                #                         json={"query": self.entry_query,
+                #                         "variables": variables},
+                #                         timeout=30).json()
+                # time.sleep(1)
+                entry_data = self._get_entry_data(title, update=True)
             except (TypeError, ValueError):
+                logger.error(f"Error fetching entry {title}. Entry not found.")
                 continue
+            except TimeoutError:
+                logger.error(f"Operation timed out while fetching entry {title}. Retrying.")
+                entry_data = None
+                for i in range(10):
+                    try:
+                        entry_data = self._get_entry_data(title, update=True)
+                        break
+                    except TimeoutError:
+                        logger.error(f"Operation timed out while fetching entry {title}."
+                                     f" Sleeping then retrying.")
+                        time.sleep(2**(i+4))
+                        continue
+                if not entry_data:
+                    raise TimeoutError(f"Timed out while trying to fetch entry"
+                                       f" {title} 10 times in a row. Manual intervention required.")
+                    logger.critical(f"Timed out while trying to fetch entry"
+                                       f" {title} 10 times in a row. Manual intervention required.")
+
             entry_tags_dict[title] = entry_data
 
         self._entry_tags_dict_updated = entry_tags_dict
