@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import datetime
 import http.client
+import traceback
 from http import HTTPStatus
 import numpy as np
 import requests
@@ -507,6 +508,13 @@ def basic_try_except(func):
             logger.error(f"An unexpected error has occurred during the daily update. {str(e)}")
             return None
     return inner
+
+
+def log_exception_error(logger, log_message):
+    full_stack_trace = traceback.format_exc()
+    logger.error(log_message)
+    logger.error(full_stack_trace)
+
 
 
 
