@@ -10,7 +10,6 @@ from sortedcollections import OrderedSet
 
 from .general_utils import load_pickled_file, save_pickled_file, split_list_interval
 
-
 # Class currently a bit of a mess with out-of-date comments
 # due to last-minute daily updating features added, to be refactored
 
@@ -20,11 +19,61 @@ logger = logging.getLogger("nyanpasutats")
 class Tags:
     """This class holds various data structures related to Anilist tags. Main data structures :
 
-    - entry_tags_dict - An object containing information about each show in AnimeDB.partial_df (each show that passes the popularity and score thresholds defined there)
+    - entry_tags_dict - An object containing
+     information about each show that meets condition defined in AnimeDB.meets_conditions
+      (each show that passes the popularity and score thresholds defined there)
 
-    - show_tags_dict - An object containing information about each show considered to be a MAIN show (non-sequel) as decided by the Graphs module. See shows_tags_dict definition for more details.
+    - show_tags_dict - An object containing information about each show
+    considered to be a MAIN show (non-sequel) as decided by the Graphs module.
+     See shows_tags_dict definition for more details.
 
     """
+    #  Example pair from entry_tags_dict :
+    #
+    #   'Cowboy Bebop' : {'Tags': [{'name': 'Space',
+    #   'percentage': 0.94,
+    #   'category': 'Setting-Universe'},
+    #   {'name': 'Crime', 'percentage': 0.92, 'category': 'Theme-Other'},
+    #   {'name': 'Episodic', 'percentage': 0.89, 'category': 'Technical'},
+    #   {'name': 'Ensemble Cast', 'percentage': 0.86, 'category': 'Cast-Main Cast'},
+    #   ...
+    #   'Genres': ['Action', 'Adventure', 'Drama', 'Sci-Fi'],
+    #   'Studio': 'Sunrise',
+    #   'Recommended': {'Samurai Champloo': 1353,
+    #   'Trigun': 548,
+    #   'Space☆Dandy': 281,
+    #   'Black Lagoon': 219,
+    #   'Baccano!': 145},
+    #   'Main': 'Cowboy Bebop' # Main show, will be the same for every entry related to Cowboy Bebop
+    #   'DoubleTags': [{'name': '<Ensemble Cast>x<Space>', 'percentage': 0.86},
+    #   {'name': '<Primarily Adult Cast>x<Space>', 'percentage': 0.85},
+    #   {'name': '<Tragedy>x<Space>', 'percentage': 0.766},
+    #   {'name': '<Male Protagonist>x<Space>', 'percentage': 0.67},
+    # ...
+
+    # Example pair from show_tags_dict :
+    # 'Cowboy Bebop' :  {'Tags': [{'name': 'Terrorism', 'percentage': 0.97},
+    #             {'name': 'Space', 'percentage': 0.94},
+    #             {'name': 'Crime', 'percentage': 0.92},
+    #             {'name': 'Episodic', 'percentage': 0.89},
+    # ...
+    #   'DoubleTags': [{'name': '<Action>x<Adventure>', 'percentage': 1},
+    #                  {'name': '<Action>x<Drama>', 'percentage': 1},
+    #                  {'name': '<Action>x<Sci-Fi>', 'percentage': 1},
+    #                  {'name': '<Drama>x<Adventure>', 'percentage': 1},
+    #   'Genres': ['Adventure', 'Action', 'Drama', 'Comedy', 'Sci-Fi', 'Mystery'],
+    #   'Studios': {'Cowboy Bebop': 'Sunrise',
+    #               'Cowboy Bebop: Tengoku no Tobira': 'bones',
+    #               'Cowboy Bebop: Yose Atsume Blues': 'Sunrise'},
+    #   'Recommended': {'Samurai Champloo': 1353,
+    #                   'Trigun': 548,
+    #                   'Space☆Dandy': 298,
+    #                   'Black Lagoon': 219,
+    #                   'Baccano!': 145},
+    #   'Related': {'Cowboy Bebop': 1,
+    #               'Cowboy Bebop: Tengoku no Tobira': 0.576,
+    #               'Cowboy Bebop: Yose Atsume Blues': 0.135}}
+
     _instance = None
 
     url = "https://graphql.anilist.co"
@@ -189,11 +238,14 @@ class Tags:
             try:
                 self._entry_tags_dict_nls_updated = load_pickled_file(entry_tags_nls_updated_filename)
             except FileNotFoundError:
-                relevant_titles = self.graphs.all_graphs_nls_updated.all_titles
-                self._entry_tags_dict_nls_updated = {entry: entry_tags for entry, entry_tags in
-                                             self.entry_tags_dict_updated.items() if entry in relevant_titles}
-                save_pickled_file(entry_tags_nls_updated_filename, self._entry_tags_dict_nls_updated)
+                self._create_nls_updated()
         return self._entry_tags_dict_nls_updated
+
+    def _create_nls_updated(self):
+        relevant_titles = self.graphs.all_graphs_nls_updated.all_titles
+        self._entry_tags_dict_nls_updated = {entry: entry_tags for entry, entry_tags in
+                                             self.entry_tags_dict_updated.items() if entry in relevant_titles}
+        save_pickled_file(entry_tags_nls_updated_filename, self._entry_tags_dict_nls_updated)
 
     @property
     def entry_tags_dict2(self):
@@ -246,7 +298,10 @@ class Tags:
             try:
                 self._show_tags_dict_nls_updated = load_pickled_file(shows_tags_nls_updated_filename)
             except FileNotFoundError:
+                # Removing all low-scored shows from the shows dict is a massive pain,
+                # easier to just create a new one
                 self.get_shows_tags(update=True, no_low_scores=True)
+
         return self._show_tags_dict_nls_updated
 
     @property
@@ -329,7 +384,7 @@ class Tags:
             doubles_dict = {f"Doubles-{i + 1}": split_doubles[i] for i in range(len(split_doubles))}
             doubles_dict2 = {"Doubles": doubles}
 
-            self._tags_per_category = self._tags_per_category | theme_dict | doubles_dict2   #| doubles_per_tag
+            self._tags_per_category = self._tags_per_category | theme_dict | doubles_dict2  # | doubles_per_tag
 
         return self._tags_per_category
 
@@ -472,7 +527,7 @@ class Tags:
                 print(f"Request for fetching tags page {page_num}"
                       f" timed out. Retrying.")
                 logger.warning(f"Request for fetching tags page {page_num}"
-                      f" timed out. Retrying.")
+                               f" timed out. Retrying.")
 
                 return
 
@@ -497,7 +552,7 @@ class Tags:
                     print(f"Error getting shows from page {page_num} while fetching tags"
                           f".Error code is {error_code}. Response is {response}. Sleeping 300 seconds.")
                     logger.error(f"Error getting shows from page {page_num} while fetching tags"
-                          f".Error code is {error_code}. Response is {response}. Sleeping 300 seconds.")
+                                 f".Error code is {error_code}. Response is {response}. Sleeping 300 seconds.")
                     time.sleep(300)
                 else:
                     show_list = []
@@ -612,7 +667,7 @@ class Tags:
                 tag1_name = tag1['name'] if type(tag1) is dict else tag1
                 tag1_p = tag1['percentage'] if type(tag1) is dict else 1
 
-                for j in range(i+1, len(tags_genres)):
+                for j in range(i + 1, len(tags_genres)):
                     tag2 = tags_genres[j]
                     tag2_name = tag2['name'] if type(tag2) is dict else tag2
                     tag2_p = tag2['percentage'] if type(tag2) is dict else 1
@@ -625,7 +680,7 @@ class Tags:
                         entry_tags_dict[entry]['DoubleTags'].append(
                             {'name': f"<{tag2_name}>x<{tag1_name}>", 'percentage': min(tag1_p, tag2_p)})
 
-            entry_data['DoubleTags'] = sorted(entry_data['DoubleTags'], reverse=True, key = lambda x:x['percentage'])
+            entry_data['DoubleTags'] = sorted(entry_data['DoubleTags'], reverse=True, key=lambda x: x['percentage'])
 
     def create_entry_tags_dict(self):
 
@@ -648,10 +703,10 @@ class Tags:
             for tag in entry_tags_list:
                 if "<" in tag['name']:
                     entry_tags_dict2[entry][tag['name']] = {'percentage':
-                                                                      tag['percentage']}
+                                                                tag['percentage']}
                 else:
                     entry_tags_dict2[entry][tag['name']] = {'percentage':
-                                                                      tag['percentage'], 'category': tag['category']}
+                                                                tag['percentage'], 'category': tag['category']}
             genres_studios = entry_data['Genres']
             if entry_data['Studio'] in self.all_anilist_tags:
                 genres_studios = genres_studios + [entry_data['Studio']]
@@ -666,10 +721,10 @@ class Tags:
     def get_shows_tags(self, no_low_scores=False, update=False):
         def calc_length_coeff(entry, stats):
             return round(min(1, stats[entry]["Episodes"] *
-                       stats[entry]["Duration"] / 200), 3)
+                             stats[entry]["Duration"] / 200), 3)
 
         def get_tags_from_entries(double=False):
-            show_tags={}
+            show_tags = {}
             if not double:
                 all_entries_tags_list = [{'name': tag['name'], 'percentage': tag['percentage']}
                                          for entry in show_related_entries
@@ -707,6 +762,7 @@ class Tags:
         else:
             entry_tags_dict = self.entry_tags_dict_nls if no_low_scores else self.entry_tags_dict
 
+        show_tags_dict = {}
         graphs = self.graphs.all_graphs_updated if update else self.graphs.all_graphs
         processed_titles = []
         show_amount = len(entry_tags_dict.keys())
@@ -730,32 +786,32 @@ class Tags:
             show_related_entries = [entry for entry in show_related_entries
                                     if entry in entry_tags_dict.keys()]
 
-            self._show_tags_dict[main_entry] = {}
+            show_tags_dict[main_entry] = {}
 
             # Tags (get the tags of all entries, if several entries have the same tag at different
             # percentages then take the highest percentage among them as the show's tag percentage)
             show_tags = get_tags_from_entries(double=False)
-            self._show_tags_dict[main_entry]['Tags'] = [{'name': tag_name, 'percentage': tag_p}
+            show_tags_dict[main_entry]['Tags'] = [{'name': tag_name, 'percentage': tag_p}
                                                         for tag_name, tag_p in show_tags.items()]
 
             show_double_tags = get_tags_from_entries(double=True)
-            self._show_tags_dict[main_entry]['DoubleTags'] = [{'name': tag_name, 'percentage': tag_p}
-                                                        for tag_name, tag_p in show_double_tags.items()]
+            show_tags_dict[main_entry]['DoubleTags'] = [{'name': tag_name, 'percentage': tag_p}
+                                                              for tag_name, tag_p in show_double_tags.items()]
 
             # Genres (simply add all the unique genres of all the entries)
             show_genres = list(set([genre for entry in show_related_entries
                                     for genre in entry_tags_dict[entry]['Genres']]))
-            self._show_tags_dict[main_entry]['Genres'] = show_genres
+            show_tags_dict[main_entry]['Genres'] = show_genres
 
             # Studios (same as genres)
             show_studios = {entry: entry_tags_dict[entry]['Studio'] for entry in show_related_entries}
-            self._show_tags_dict[main_entry]['Studios'] = show_studios
+            show_tags_dict[main_entry]['Studios'] = show_studios
 
             # Recommended (we take the recommendations for each entry the show has, sum up the values,
             # and take the top 5 with the highest recommendation values).
             show_recommended = get_recommended_shows()
 
-            self._show_tags_dict[main_entry]['Recommended'] = show_recommended
+            show_tags_dict[main_entry]['Recommended'] = show_recommended
 
             # Related
             stats_of_related_entries = anime_db.get_stats_of_shows(show_related_entries,
@@ -764,7 +820,7 @@ class Tags:
             for entry in show_related_entries:
                 length_coeff = calc_length_coeff(entry, stats_of_related_entries)
                 related[entry] = length_coeff
-            self._show_tags_dict[main_entry]['Related'] = related
+            show_tags_dict[main_entry]['Related'] = related
 
             # # Add main show to entry_dict
             for entry in show_related_entries:
@@ -774,12 +830,21 @@ class Tags:
             processed_titles = processed_titles + show_related_entries
 
         if update:
-            filename = shows_tags_nls_updated_filename if no_low_scores else shows_tags_updated_filename
-            self._show_tags_dict_updated = self._show_tags_dict
+            if no_low_scores:
+                filename = shows_tags_nls_updated_filename
+                self._show_tags_dict_nls_updated = show_tags_dict
+            else:
+                filename = shows_tags_updated_filename
+                self._show_tags_dict_updated = show_tags_dict
         else:
-            filename = shows_tags_nls_filename if no_low_scores else shows_tags_filename
+            if no_low_scores:
+                filename = shows_tags_nls_filename
+                self._show_tags_dict_nls = show_tags_dict
+            else:
+                filename = shows_tags_filename
+                self._show_tags_dict = show_tags_dict
 
-        save_pickled_file(filename, self._show_tags_dict)
+        save_pickled_file(filename, show_tags_dict)
 
     @staticmethod
     def get_tag_index(tag_name, show_tags_list):
@@ -809,7 +874,7 @@ class Tags:
         :return:
         """
 
-        max_score = scores[show]#.item()
+        max_score = scores[show]  # .item()
         for entry, length_coeff in self.show_tags_dict_nls_updated[show]['Related'].items():
             if length_coeff == 1 and entry != show:
                 try:
@@ -880,14 +945,6 @@ class Tags:
         print("Adding single tags")
         for title in titles_to_add:
             try:
-                # malId = self.anime_db.get_id_by_title(title)
-                # variables = {"idMal": malId}
-                # logger.info(f"Fetching entry {title} with malId {malId}")
-                # entry = requests.post(self.url,
-                #                         json={"query": self.entry_query,
-                #                         "variables": variables},
-                #                         timeout=30).json()
-                # time.sleep(1)
                 entry_data = self._get_entry_data(title, update=True)
             except (TypeError, ValueError):
                 logger.error(f"Error fetching entry {title}. Entry not found.")
@@ -902,13 +959,13 @@ class Tags:
                     except TimeoutError:
                         logger.error(f"Operation timed out while fetching entry {title}."
                                      f" Sleeping then retrying.")
-                        time.sleep(2**(i+4))
+                        time.sleep(2 ** (i + 4))
                         continue
                 if not entry_data:
                     raise TimeoutError(f"Timed out while trying to fetch entry"
                                        f" {title} 10 times in a row. Manual intervention required.")
                     logger.critical(f"Timed out while trying to fetch entry"
-                                       f" {title} 10 times in a row. Manual intervention required.")
+                                    f" {title} 10 times in a row. Manual intervention required.")
 
             entry_tags_dict[title] = entry_data
 
@@ -923,6 +980,8 @@ class Tags:
         print("Saving entry tags")
         save_pickled_file(entry_tags_updated_filename, self._entry_tags_dict_updated)
 
+        self._create_nls_updated()
         print("Beginning show tags update")
         self.get_shows_tags(update=True)
+        self.get_shows_tags(update=True, no_low_scores=True)
         print("Finished show tags update")
