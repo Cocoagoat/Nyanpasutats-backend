@@ -544,8 +544,9 @@ class Graphs:
                                      update_from_scratch=update_from_scratch,
                                      titles_to_remove=titles_to_remove)
         graph_creator.create_graphs()
+
         self._all_graphs_nls = self.all_graphs.filter_low_scores()
-        save_pickled_file(self._all_graphs_nls, graphs_dict_nls_updated_filename)
+        save_pickled_file(graphs_dict_nls_updated_filename, self._all_graphs_nls)
 
     @property
     def all_graphs(self):
