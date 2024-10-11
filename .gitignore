@@ -13,6 +13,7 @@
 !.gitignore
 !requirements.txt
 !malstats/main/data/NSFWTags.txt
+!malstats/.vscode/launch.json
 malstats/main/modules/unused.py
 malstats/main/modules/Teest3.py
 malstats/main/modules/Teest5.py
