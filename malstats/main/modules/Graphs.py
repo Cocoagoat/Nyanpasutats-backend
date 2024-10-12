@@ -545,8 +545,8 @@ class Graphs:
                                      titles_to_remove=titles_to_remove)
         graph_creator.create_graphs()
 
-        self._all_graphs_nls = self.all_graphs.filter_low_scores()
-        save_pickled_file(graphs_dict_nls_updated_filename, self._all_graphs_nls)
+        # self._all_graphs_nls = self.all_graphs.filter_low_scores()
+        # save_pickled_file(graphs_dict_nls_updated_filename, self._all_graphs_nls)
 
     @property
     def all_graphs(self):
