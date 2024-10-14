@@ -542,7 +542,7 @@ class Graphs:
                 self._all_graphs = graph_creator.create_graphs()
 
     @staticmethod
-    def update_graphs(self, titles_to_add, titles_to_remove, update_from_scratch=False):
+    def update_graphs(titles_to_add, titles_to_remove, update_from_scratch=False):
         graph_creator = GraphCreator(titles_to_add, update=True,
                                      update_from_scratch=update_from_scratch,
                                      titles_to_remove=titles_to_remove)
@@ -567,7 +567,12 @@ class Graphs:
                 self._all_graphs_updated = load_pickled_file(graphs_dict_updated_filename)
             except FileNotFoundError:
                 try:
-                    self.update_graphs()
+                    titles_to_add, titles_to_remove = AnimeDB.get_post_update_changed_titles(
+                        update_from_scratch=False)
+                    titles_to_add = self.anime_db.filter_titles(AnimeDB.show_meets_standard_conditions,
+                                                                titles_to_add)
+
+                    self.update_graphs(titles_to_add, titles_to_remove, update_from_scratch=False)
                 except FileNotFoundError:
                     self.initialize_graph_collection(no_low_scores=False)
         return self._all_graphs_updated
