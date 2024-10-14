@@ -74,8 +74,6 @@ class Tags:
     #               'Cowboy Bebop: Tengoku no Tobira': 0.576,
     #               'Cowboy Bebop: Yose Atsume Blues': 0.135}}
 
-    _instance = None
-
     url = "https://graphql.anilist.co"
 
     page_query = '''
@@ -153,6 +151,8 @@ class Tags:
         }
         '''
 
+    _instance = None
+
     def __new__(cls, *args, **kwargs):
         """The class is a Singleton - we only need one instance of it since its purpose is
         to house and create on demand all the data structures that are used in this project."""
@@ -191,6 +191,10 @@ class Tags:
     def __init__(self):
         # All properties are loaded on demand
         pass
+
+    @classmethod
+    def reset(cls):
+        cls._instance = None
 
     @property
     def tags_to_include(self):
@@ -250,7 +254,6 @@ class Tags:
     @property
     def entry_tags_dict2(self):
         if not self._entry_tags_dict2:
-            print("Loading entry-tags alternative dictionary")
             self.get_entry_tags2()
         return self._entry_tags_dict2
 
@@ -259,7 +262,6 @@ class Tags:
         # No need for filename since it gets created
         # very quickly and only needs to load once
         if not self._entry_tags_dict2_updated:
-            print("Loading entry-tags updated alternative dictionary")
             self.get_entry_tags2(update=True)
         return self._entry_tags_dict2_updated
 
@@ -925,7 +927,8 @@ class Tags:
 
         titles_to_add, titles_to_remove = AnimeDB.get_post_update_changed_titles(
             update_from_scratch=update_from_scratch)
-        self.anime_db = AnimeDB(anime_database_updated_name)
+
+        self.anime_db = AnimeDB(anime_database_updated_name, reset=True)
         # ids = self.anime_db.df.row(self.anime_db.stats['ID'])[1:]
         # print(f"Length of updated df inside Tags : {len(self.anime_db.df.columns)}")
         # print(f"Titles before filtering inside Tags: {titles_to_add}")
@@ -934,6 +937,7 @@ class Tags:
         # print(f"Titles after filtering inside Tags: {titles_to_add}")
         print("Beginning graphs update")
         self.graphs.update_graphs(titles_to_add, titles_to_remove, update_from_scratch)
+        Graphs.reset()
         print("Finished graphs update")
 
         if os.path.exists(entry_tags_updated_filename) and not update_from_scratch:

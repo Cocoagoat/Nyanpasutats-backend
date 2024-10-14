@@ -98,8 +98,6 @@ def get_user_recs_task(username, site="MAL"):
         predictions, predictions_sorted_by_diff, fav_tags, least_fav_tags = scores_predictor.predict_scores()
         predictions = add_image_urls_to_predictions(predictions)
         predictions_sorted_by_diff = add_image_urls_to_predictions(predictions_sorted_by_diff)
-        print(f"Predictions look like {predictions[0]}")
-        recs_logger.info(f"Predictions look like {predictions[0]}")
         recs_logger.info(f"Successfully fetched predictions for {site} user {username}")
 
         return {'Recommendations': predictions,
@@ -133,6 +131,7 @@ def daily_update():
     daily_backup()
     try:
         AnimeDB(anime_database_updated_name).generate_anime_DB(update=True)
+        AnimeDB.reset()
     except Exception:
         # Theoretically should never happen unless something's wrong with MAL itself.
         log_message = f"Encountered a critical failure during AnimeDB daily update." \
@@ -142,6 +141,7 @@ def daily_update():
 
     try:
         Tags().update_tags(update_from_scratch=False)
+        Tags.reset()
     except Exception:
         log_message = f"Graphs/Tags daily update failed. " \
                       f"Restoring previous files and attempting update from scratch."
