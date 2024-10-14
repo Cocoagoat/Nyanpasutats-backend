@@ -68,17 +68,17 @@ class AnimeDB:
     _instances = {}
     # noinspection DuplicatedCode
 
-    def __new__(cls, filename=None, *args, **kwargs):
+    def __new__(cls, filename=None, reset=False, *args, **kwargs):
         """The class is a Multiton, currently used for two different databases - the original
         one created at the start of every data gathering cycle (AnimeDB.parquet),
         and all of its subsequent updates (AnimeDB-U.parquet, updated daily)"""
-        if filename not in cls._instances:
+        if filename not in cls._instances or reset:
             instance = super().__new__(cls)
             cls._instances[filename] = instance
 
             instance._filename = anime_database_name if not filename else filename
             instance._df = None
-            instance._sql_db = AnimeData if not filename else AnimeDataUpdated
+            instance._sql_db = AnimeData if not filename or filename == anime_database_name else AnimeDataUpdated
             instance._titles = None
             instance._partial_df = None
             instance._df_metadata = None
@@ -93,6 +93,10 @@ class AnimeDB:
             instance._seasons = None
             instance._years = None
         return cls._instances[filename]
+
+    @classmethod
+    def reset(cls):
+        cls._instances = {}
 
     stats = {'ID': 0, 'Mean Score': 1, 'Scores': 2, 'Members': 3, 'Episodes': 4,
              'Duration': 5, 'Type': 6, 'Year': 7, 'Season': 8}
@@ -329,7 +333,10 @@ class AnimeDB:
 
             anime_data = []
             for field in fields_no_edit_needed:  # This takes care of the fields that can be put into db as they are
-                anime_data.append(anime["node"][field])
+                try:
+                    anime_data.append(anime["node"][field])
+                except KeyError:
+                    return  # Critical fields, ignore entry if they're missing
 
             # The rest of the fields need editing or error handling
             if anime["node"]["num_episodes"]:
@@ -349,9 +356,6 @@ class AnimeDB:
 
             anime_data.append(media_type_index)
 
-            title = anime["node"]["title"]
-            anime_data_dict[title] = anime_data
-
             try:
                 year = int(anime["node"]["start_season"]["year"])
                 season = anime["node"]["start_season"]["season"]
@@ -360,16 +364,21 @@ class AnimeDB:
                 try:
                     year, season = parse_start_date(anime["node"]["start_date"])
                 except KeyError:
-                    year, season = None, None
+                    # year, season = None, None
+                    return  # Critical fields, ignore entry if they're missing
             anime_data.append(year)
 
             correct_seasons = {'Sousou no Frieren': 4}
             # Stupid API has Frieren as a summer anime,
             # it'll probably have more mistakes in that vein
+
+            title = anime["node"]["title"]
             if title in correct_seasons.keys():
                 anime_data.append(correct_seasons[title])
             else:
                 anime_data.append(season)
+
+            anime_data_dict[title] = anime_data
 
             image_url = anime['node'].get('main_picture', {}).get('medium', "")
 
@@ -413,7 +422,11 @@ class AnimeDB:
 
             for anime in anime_batch["data"]:
                 if not non_sequels_only:
+
                     anime_entry = create_anime_DB_entry(anime)
+                    if not anime_entry:
+                        continue
+
                     anime_entries.append(anime_entry)
                     title = anime_entry['name']
                 if title.startswith(last_show):
