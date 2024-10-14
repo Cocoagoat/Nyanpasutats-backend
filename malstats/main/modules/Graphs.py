@@ -140,7 +140,9 @@ class AnimeGraph(Graph):
         try:
             return max(members_of_each_show, key=lambda x: members_of_each_show[x]['Scores'])
         except ValueError:
-            print("Testing")
+            logging.error(f"Unable to determine main show for graph with titles {self.titles}. Substituting.")
+            return self.titles[0]  # Not something critical enough to make the program stop running,
+            # but warrants a manual look eventually
 
     def get_adjacent_vertex_names(self, vertex_name: str):
         """ This function returns the names of the vertices adjacent to a known vertex in a graph G."""
@@ -307,7 +309,6 @@ class GraphCollection():
         self.graphs = {new_key: self.graphs.pop(old_key)
                        for old_key, new_key in list(zip(old_keys, new_keys))}
         self.graphs.pop('', 0)
-        # save_pickled_file(graphs_dict_no_low_scores_filename, self)
 
 
 class GraphCreator():
@@ -373,9 +374,6 @@ class GraphCreator():
                 current_anime = None
             except UserDoesNotExistError:
                 return
-
-        # if not self.saved_for_update:
-        #     save_graphs_for_update()
 
         title = current_anime['title']
         print(Fore.LIGHTWHITE_EX + f"Currently on title {title}")
@@ -506,6 +504,10 @@ class Graphs:
 
         return cls._instance
 
+    @classmethod
+    def reset(cls):
+        cls._instance = None
+
     def initialize_graph_collection(self, no_low_scores=False):
         filename = graphs_dict_nls_filename if no_low_scores else graphs_dict_filename
         try:
@@ -539,14 +541,12 @@ class Graphs:
                 graph_creator = GraphCreator(relevant_titles)
                 self._all_graphs = graph_creator.create_graphs()
 
+    @staticmethod
     def update_graphs(self, titles_to_add, titles_to_remove, update_from_scratch=False):
         graph_creator = GraphCreator(titles_to_add, update=True,
                                      update_from_scratch=update_from_scratch,
                                      titles_to_remove=titles_to_remove)
         graph_creator.create_graphs()
-
-        # self._all_graphs_nls = self.all_graphs.filter_low_scores()
-        # save_pickled_file(graphs_dict_nls_updated_filename, self._all_graphs_nls)
 
     @property
     def all_graphs(self):
