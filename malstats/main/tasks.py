@@ -1,3 +1,7 @@
+from django.conf import settings
+
+from .models import SavedImage
+
 from .modules.Model import Model, UserScoresPredictor
 from django.core.cache import cache
 import shutil
@@ -16,6 +20,7 @@ from django.db.utils import OperationalError
 import logging
 import time
 import traceback
+import os
 
 current_dir = Path(__file__).parent
 model = None
@@ -76,6 +81,8 @@ def get_user_seasonal_stats_task(username, site="MAL"):
         return {'error': e.message, 'status': e.status}
 
     except Exception as e:
+        full_stack_trace = traceback.format_exc()
+        logger.error(full_stack_trace)
         seasonal_logger.error(f"An unexpected error has occurred while fetching seasonal stats. {str(e)}")
         return {'error': "An unexpected error has occurred on our side. Please try again later.", 'status': 500}
 
@@ -159,6 +166,71 @@ def daily_update():
                           f" Manual intervention required."
             log_exception_error(logger, log_message)
             restore_previous_files()
+
+
+@shared_task(name="main.tasks.clean_up_folder")
+def clean_up_folder():
+    """
+    Clean up a folder if it exceeds a maximum size by deleting the least recently accessed files.
+
+    Args:
+        folder_path (str): The path of the folder to monitor.
+        max_size_gb (int): The maximum allowed size of the folder in GB.
+        num_files_to_delete (int): The number of files to delete per cleanup iteration.
+    """
+    folder_path = os.path.join(settings.MEDIA_ROOT, "userImages")
+    max_size_gb = 0.06
+    max_size_bytes = max_size_gb * 1024 * 1024 * 1024  # Convert GB to bytes
+
+    # Calculate the total size of the folder
+    total_size = 0
+    file_info_list = []
+
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            file_path = os.path.join(root, file)
+            try:
+                file_size = os.path.getsize(file_path)
+                last_access_time = os.path.getatime(file_path)
+                total_size += file_size
+                file_info_list.append((file_path, file_size, last_access_time))
+            except OSError as e:
+                print(f"Error accessing file {file_path}: {e}")
+
+    # If the total size exceeds the limit, delete the least recently accessed files
+    if total_size > max_size_bytes:
+        print(f"Folder size ({total_size / (1024**3):.2f} GB) exceeds {max_size_gb} GB. Cleaning up...")
+
+        # Sort files by last access time (oldest first)
+        file_info_list.sort(key=lambda x: x[2])  # Sort by last_access_time
+
+        deleted_size = 0
+        deleted_files = 0
+
+        for file_path, file_size, _ in file_info_list:
+            relative_file_path = os.path.relpath(file_path, settings.MEDIA_ROOT)
+            try:
+                # Delete the file
+                os.remove(file_path)
+                deleted_size += file_size
+                deleted_files += 1
+
+                print(f"Deleted file: {file_path} ({file_size / (1024**2):.2f} MB)")
+
+                # Delete the corresponding SavedImage model
+                SavedImage.objects.filter(file_path=relative_file_path).delete()
+                print(f"Deleted corresponding SavedImage entry for: {relative_file_path}")
+
+            except OSError as e:
+                print(f"Error deleting file {file_path}: {e}")
+            except SavedImage.DoesNotExist:
+                print(f"No SavedImage entry found for: {relative_file_path}")
+
+            # Stop once we've deleted the specified number of files or reduced size enough
+            if total_size - deleted_size <= (9/10)*max_size_bytes:
+                break
+
+        print(f"Deleted {deleted_files} files, freeing up {deleted_size / (1024**3):.2f} GB.")
 
 
 def daily_backup():

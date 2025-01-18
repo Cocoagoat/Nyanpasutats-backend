@@ -2,12 +2,12 @@ from .base_settings import *
 
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', 'django']
 
 SECURE_HSTS_SECONDS = 3600
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
-
+# CORS_ALLOWED_ORIGINS = ["http://localhost:3000"] # Let nginx take care of this
 SESSION_COOKIE_SECURE = True
 # CSRF_COOKIE_SECURE = True
 
