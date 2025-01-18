@@ -4,6 +4,7 @@ from django.db import models
 from .model_managers import RetryManager
 from django.db.utils import OperationalError
 import time
+import uuid
 
 import logging
 
@@ -47,6 +48,14 @@ class AnimeDataUpdated(models.Model):
         return f"{self.name} (Updated)"
 
     objects = RetryManager()
+
+
+class SavedImage(models.Model):
+    unique_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)  # Unique identifier for the image
+    user_name = models.CharField(max_length=255)  # Username
+    file_name = models.CharField(max_length=255)  # Original file name
+    file_path = models.FileField(upload_to='generated/')  # File path in the media directory
+    created_at = models.DateTimeField(auto_now_add=True)  # Timestamp
 
 
 
