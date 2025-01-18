@@ -1,12 +1,19 @@
+from datetime import timedelta
 from pathlib import Path
 from django.apps import AppConfig
 from celery.schedules import crontab
 import os
+import tensorflow as tf
+
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# tf.config.set_visible_devices([], 'GPU')
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+SECRET_KEY = "dev-mode"
 
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
+MEDIA_URL = '/data/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'data/media')
 
 # Application definition
 INSTALLED_APPS = [
@@ -31,8 +38,6 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'django.middleware.cache.UpdateCacheMiddleware',
-    'django.middleware.cache.FetchFromCacheMiddleware',
 ]
 
 CELERY_BROKER_URL = 'redis://localhost:6379/0'
@@ -47,10 +52,13 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'main.tasks.daily_update',
         'schedule': crontab(hour="00", minute="52"),
     },
+    'clean_up_folder': {
+        'task': 'main.clean_up_folder',
+        'schedule': crontab(hour="20", minute="15")
+    }
 }
 
 ROOT_URLCONF = 'animisc.urls'
-
 
 TEMPLATES = [
     {

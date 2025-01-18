@@ -29,7 +29,8 @@ app.conf.task_routes = {
     'main.tasks.get_user_affs_task': {'queue': 'affinity'},
     'main.tasks.get_user_recs_task': {'queue': 'recs'},
     'main.tasks.get_user_seasonal_stats_task': {'queue': 'seasonal'},
-    'main.tasks.daily_update': {'queue': 'default'}
+    'main.tasks.daily_update': {'queue': 'default'},
+    'main.tasks.clean_up_folder': {'queue': 'default'}
 }
 
 # Using a string here means the worker doesn't have to serialize
