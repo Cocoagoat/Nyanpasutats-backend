@@ -359,7 +359,7 @@ class SeasonalStats:
                                                            for show in self.anime_data if show.name
                                                            in season_stats.show_list.keys()]))
 
-    # @timeit
+    @timeit
     def get_user_seasonal_stats(self):
         # Main function
         tags = Tags()
@@ -373,6 +373,7 @@ class SeasonalStats:
             self.user_list = {title: stats for title, stats
                               in self.user_list.items()
                               if title in tags.show_tags_dict_updated.keys()}
+            
             # or title in new anime db but not in old anime db?
 
         self.anime_data = AnimeDataUpdated.objects.filter(name__in=self.user_list.keys())

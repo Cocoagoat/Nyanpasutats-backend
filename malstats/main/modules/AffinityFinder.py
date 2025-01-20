@@ -14,7 +14,7 @@ import pyximport  # Need this to import .pyx files
 pyximport.install(setup_args={"include_dirs": np.get_include()})  # Need to manually include numpy or it won't work
 from main.modules.gottagofasttest2 import count_common_shows, compute_affinity
 
-
+@timeit
 def find_max_affinity(username, site="MAL", min_common_shows=20):
     """This function iterates over rows in the database and calculates the affinity
     between the user provided and each person (unless a limit is given) in the database.

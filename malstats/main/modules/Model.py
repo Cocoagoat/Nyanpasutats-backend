@@ -14,7 +14,7 @@ from main.modules.GeneralData import GeneralData
 from main.modules.Tags import Tags
 from main.modules.User import User
 from main.modules.UserDB import UserDB
-from main.modules.general_utils import load_pickled_file
+from main.modules.general_utils import load_pickled_file, timeit
 from main.models import AnimeDataUpdated
 
 recs_logger = logging.getLogger("nyanpasutats.recs_logger")
@@ -206,6 +206,7 @@ class UserScoresPredictor():
         self.shows_to_take = shows_to_take
         self.user_shows_df_with_name = self.get_user_db(self.user, self.shows_to_take)
 
+    @timeit
     def predict_scores(self):
         least_fav_tags = [Tags.format_doubletag(key) for key, value in sorted(
             self.user.tag_affinity_dict.items(), key=lambda x: (
