@@ -83,7 +83,6 @@ def get_user_seasonal_stats_task(username, site="MAL"):
 @shared_task(base=MainTask)
 @redis_cache_wrapper(timeout=CACHE_TIMEOUT)
 def get_user_recs_task(username, site="MAL"):
-    print(f"GPU available : {tf.test.is_gpu_available()}")
     recs_logger.info(f"Entering recommendations task for {site} user {username}")
     global model
     if not model:
