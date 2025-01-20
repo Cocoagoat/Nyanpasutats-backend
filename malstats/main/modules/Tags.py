@@ -598,18 +598,27 @@ class Tags:
                               json={"query": self.entry_query,
                                     "variables": variables},
                               timeout=30).json()
-        time.sleep(1)
+        logger.info(f"Successfully fetched entry data for {title}")
+        time.sleep(2.5)
         entry = entry['data']['Media']
+        
 
         # title = self._get_entry_title(entry, ids)
-        show_recommendations = self._get_recommended_shows(entry)
+        try:
+            show_recommendations = self._get_recommended_shows(entry)
+            logger.info(f"Successfully fetched recommendations for {title}")
+        except Exception:
+            logger.error(f"Error getting recommendations for entry {title}")
+            show_recommendations = {}
 
+        
         graphs_dict = self.graphs.all_graphs if not update else self.graphs.all_graphs_updated
         try:
             main_entry, _ = graphs_dict.find_related_entries(title)
-        except TypeError:
-            print(f"Error finding related entry in graphs for entry {title}.")
-            logger.error(f"Error finding related entry in graphs for entry {title}.")
+            logger.info(f"Successfully found main entry {title}")
+        except Exception:
+            print(f"Error finding main entry in graphs for entry {title}.")
+            logger.error(f"Error finding main entry in graphs for entry {title}.")
             main_entry = title
 
         entry_data = {
@@ -622,6 +631,7 @@ class Tags:
             "Main": main_entry
             # If recs amount less than 25 start penalizing?
         }
+        logger.info(f"Successfully created entry_data for {title}. Returning")
         return entry_data
 
     # def _get_entry_title(self, entry):
@@ -947,11 +957,14 @@ class Tags:
 
         print("Beginning entry-tags update")
         print("Adding single tags")
+
+        errors = 0
         for title in titles_to_add:
             try:
                 entry_data = self._get_entry_data(title, update=True)
             except (TypeError, ValueError):
-                logger.error(f"Error fetching entry {title}. Entry not found.")
+                logger.error(f"Error fetching entry {title}.")
+                errors += 1
                 continue
             except TimeoutError:
                 logger.error(f"Operation timed out while fetching entry {title}. Retrying.")
@@ -966,11 +979,13 @@ class Tags:
                         time.sleep(2 ** (i + 4))
                         continue
                 if not entry_data:
-                    raise TimeoutError(f"Timed out while trying to fetch entry"
-                                       f" {title} 10 times in a row. Manual intervention required.")
                     logger.critical(f"Timed out while trying to fetch entry"
                                     f" {title} 10 times in a row. Manual intervention required.")
-
+                    raise TimeoutError(f"Timed out while trying to fetch entry"
+                                       f" {title} 10 times in a row. Manual intervention required.")
+                    
+            if errors == 5:
+                raise ValueError("Failed to fetch 5 entries during update.")
             entry_tags_dict[title] = entry_data
 
         self._entry_tags_dict_updated = entry_tags_dict
