@@ -183,9 +183,9 @@ class UserAffinityCalculator:
 
             try:
                 main_show = self.entry_tags_dict[entry]['Main']
+                main_show_data = self.show_tags_dict[main_show]
             except KeyError:
                 continue
-            main_show_data = self.show_tags_dict[main_show]
             user_watched_entries_length_coeffs = [x[1] for x in
                                                   main_show_data['Related'].items()
                                                   if self.user.scores[x[0]]]
