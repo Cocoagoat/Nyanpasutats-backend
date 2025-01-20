@@ -1,6 +1,5 @@
 absl-py==1.4.0
 amqp==5.2.0
-annoy==1.17.3
 anyio==3.7.1
 argon2-cffi==21.3.0
 argon2-cffi-bindings==21.2.0
