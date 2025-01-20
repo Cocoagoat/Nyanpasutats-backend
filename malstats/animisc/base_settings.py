@@ -8,8 +8,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
-
 # Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -25,9 +23,9 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -47,7 +45,7 @@ CELERY_RESULT_EXPIRES = 3600
 CELERY_BEAT_SCHEDULE = {
     'update_anime_db': {
         'task': 'main.tasks.daily_update',
-        'schedule': crontab(hour="07", minute="00"),
+        'schedule': crontab(hour="00", minute="52"),
     },
 }
 

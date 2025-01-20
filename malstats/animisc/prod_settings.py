@@ -4,13 +4,18 @@ from .base_settings import *
 DEBUG = False
 
 CORS_ALLOW_ALL_ORIGINS = False
+
 CORS_ALLOWED_ORIGINS = [
-    'https://malstats.com',
-    'https://www.malstats.com',
+"http://nps.moe",
+"https://nps.moe",
+# "http://localhost:3000",
+# "https://localhost:3000",
+# "127.0.0.1"
 ]
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1',
-                 'nyanpasutats.moe', 'www.nyanpasutats.moe']
+
+ALLOWED_HOSTS = ['nps.moe', 'www.nps.moe']
+                #   'localhost', '127.0.0.1']
 
 SECURE_HSTS_SECONDS = 3600
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True

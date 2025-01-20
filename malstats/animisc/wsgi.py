@@ -12,7 +12,7 @@ import os
 from django.core.wsgi import get_wsgi_application
 
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'animisc.dev_settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'animisc.prod_settings')
 # Should be defined in virtual environment's activate script as well,
 # if there's a settings-related bug make sure that it's there
 
