@@ -178,7 +178,7 @@ def clean_up_folder():
         num_files_to_delete (int): The number of files to delete per cleanup iteration.
     """
     folder_path = os.path.join(settings.MEDIA_ROOT, "userImages")
-    max_size_gb = 0.06
+    max_size_gb = 15
     max_size_bytes = max_size_gb * 1024 * 1024 * 1024  # Convert GB to bytes
 
     # Calculate the total size of the folder
@@ -194,11 +194,11 @@ def clean_up_folder():
                 total_size += file_size
                 file_info_list.append((file_path, file_size, last_access_time))
             except OSError as e:
-                print(f"Error accessing file {file_path}: {e}")
+                logger.info(f"Error accessing file {file_path}: {e}")
 
     # If the total size exceeds the limit, delete the least recently accessed files
     if total_size > max_size_bytes:
-        print(f"Folder size ({total_size / (1024**3):.2f} GB) exceeds {max_size_gb} GB. Cleaning up...")
+        logger.info(f"Folder size ({total_size / (1024**3):.2f} GB) exceeds {max_size_gb} GB. Cleaning up...")
 
         # Sort files by last access time (oldest first)
         file_info_list.sort(key=lambda x: x[2])  # Sort by last_access_time
@@ -214,22 +214,24 @@ def clean_up_folder():
                 deleted_size += file_size
                 deleted_files += 1
 
-                print(f"Deleted file: {file_path} ({file_size / (1024**2):.2f} MB)")
+                logger.info(f"Deleted file: {file_path} ({file_size / (1024**2):.2f} MB)")
 
                 # Delete the corresponding SavedImage model
                 SavedImage.objects.filter(file_path=relative_file_path).delete()
-                print(f"Deleted corresponding SavedImage entry for: {relative_file_path}")
+                logger.info(f"Deleted corresponding SavedImage entry for: {relative_file_path}")
 
             except OSError as e:
-                print(f"Error deleting file {file_path}: {e}")
+                logger.error(f"Error deleting file {file_path}: {e}")
             except SavedImage.DoesNotExist:
-                print(f"No SavedImage entry found for: {relative_file_path}")
+                logger.warning(f"No SavedImage entry found for: {relative_file_path}")
 
             # Stop once we've deleted the specified number of files or reduced size enough
             if total_size - deleted_size <= (9/10)*max_size_bytes:
                 break
 
-        print(f"Deleted {deleted_files} files, freeing up {deleted_size / (1024**3):.2f} GB.")
+        logger.info(f"Deleted {deleted_files} files, freeing up {deleted_size / (1024**3):.2f} GB.")
+    else:
+        logger.info(f"Folder size ({total_size / (1024**3):.2f} GB) is below {max_size_gb} GB. No cleanup required.")
 
 
 def daily_backup():
