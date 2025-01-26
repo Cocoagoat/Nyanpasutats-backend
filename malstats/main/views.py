@@ -123,10 +123,9 @@ def get_queue_position(request):
     random = request.GET.get('random')
     if not random:
         return Response({'error': "Unauthorized access"}, status=403)
-    print("Got past random thingy")
+
     queue_type = request.GET.get('type')
     queue_cache_key = determine_queue_cache_key(queue_type, "view")
-    print("Returning queuepos")
     return Response({'queuePosition': cache.get(queue_cache_key, 1)}, status=200)
 
 
@@ -184,21 +183,18 @@ def update_image_url_view(request):
 @csrf_exempt
 def upload_infographic_image(request):
     if request.method == 'POST':
-        print("Entered request")
+
         upload_handlers = [TemporaryFileUploadHandler()]
         parser = MultiPartParser(request.META, request, upload_handlers)
         parsed_data, files = parser.parse()
         if 'image' not in files:
             return JsonResponse({"error": "Image not sent"}, status=400)
 
-        print(f"Parsed data, files : {parsed_data}, {files}")
         image_type = parsed_data.get('image_type')  # Adjust key as necessary
         if image_type not in ['tierList', 'seasonalCard']:
             return JsonResponse({"error": "Invalid image type"}, status=400)
-        print(f"image_type is {image_type}")
-        # image_file = files.get('image')
+
         image_name = parsed_data.get('image_name')
-        print(f"image_name is {image_name}")
         try:
             file_path = default_storage.save(f"userImages/{image_name}.png", files['image'])
             # This file_path might not be exactly f"userImages/{image_name}.png if the image
@@ -207,10 +203,9 @@ def upload_infographic_image(request):
             saved_image = SavedImage(file_path=file_path, file_name=image_name)
             saved_image.save()
         except Exception as e:
-            print(e)
+            logger.error(f"An error has occurred while saving the image with name {image_name}. {e}")
 
-        image_url = f"http://localhost:3000/userImages/{saved_image.unique_id}"
-        print(f"image_url is {image_url}")# Adjust based on your MEDIA_URL
+        image_url = f"https://nps.moe/userImages/{saved_image.unique_id}"
         return JsonResponse({"url": image_url})
     else:
         return JsonResponse({"error": "No image provided"}, status=400)
@@ -218,20 +213,13 @@ def upload_infographic_image(request):
 
 def fetch_infographic_image(request):
     unique_id = request.GET.get('unique_id', "")
-    print(f"unique_id is {unique_id}")
     saved_image = get_object_or_404(SavedImage, unique_id=unique_id)
-
     # Serve the file
     file_path = saved_image.file_path  # Full path to the file
-    file_url = saved_image.file_path.url
-    image_url = request.build_absolute_uri(f"{settings.MEDIA_URL}{file_path}")
-    print(f"file_path is {file_path}")
-    print(f"file_url is {file_url}")
-    print(f"image_url is {image_url}")
+    image_url = f"{settings.MEDIA_URL}{file_path}"
     try:
-        # return FileResponse(open(file_path, 'rb'), content_type='image/png')
         return JsonResponse({"url": image_url})
     except Exception as e:
-        print("Exception when returning url", e)
+        logger.error(f"An error has occurred while fetching the image with url {image_url}. {e}")
 
 

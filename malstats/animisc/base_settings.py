@@ -10,10 +10,9 @@ import tensorflow as tf
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-SECRET_KEY = "dev-mode"
-
-MEDIA_URL = '/data/media/'
-MEDIA_ROOT = os.path.join(BASE_DIR, 'data/media')
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
+MEDIA_URL = 'https://nps.moe/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'main/data/media')
 
 # Application definition
 INSTALLED_APPS = [
